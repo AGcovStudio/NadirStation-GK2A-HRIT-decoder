@@ -1,0 +1,15 @@
+build/
+dist/
+installer/output/
+third_party/
+*.cs8
+*.cs16
+*.wav
+EncryptionKeyMessage.bin
+*.bin
+build_log.txt
+CMakeCache.txt
+CMakeFiles/
+.vs/
+.idea/
+*.user

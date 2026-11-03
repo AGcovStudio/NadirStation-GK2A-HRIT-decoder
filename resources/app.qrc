@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/">
+    <file alias="eula.html">eula.html</file>
+    <file alias="icon.png">icon/app_256.png</file>
+  </qresource>
+</RCC>

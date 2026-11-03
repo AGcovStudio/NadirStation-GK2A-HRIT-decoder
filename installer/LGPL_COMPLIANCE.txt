@@ -1,0 +1,43 @@
+﻿Qt and the GNU LGPL v3 - how to get the source and replace the libraries
+========================================================================
+Qt 与 GNU LGPL v3：怎样取得源代码、怎样替换 Qt 库
+
+1. What is used / 用到什么
+   The program uses Qt 6.11.2 (MinGW 64-bit build from the official Qt online installer) as DLL files placed
+   in the installation folder (Qt6Core.dll, Qt6Gui.dll, Qt6Widgets.dll, Qt6Svg.dll, Qt6Network.dll and the
+   plugin folders platforms\, styles\, imageformats\, iconengines\, generic\, networkinformation\, tls\).
+   Qt is licensed under the GNU Lesser General Public License v3 (LGPL v3; text in LICENSES\Qt_LGPL-3.0.txt,
+   which refers to the GNU GPL v3 in LICENSES\GPL-3.0.txt). The Qt libraries have NOT been modified.
+   程序以 DLL 方式动态链接 Qt 6.11.2（官方在线安装器的 MinGW 64 位版），未修改 Qt 源代码。
+
+2. Source code of Qt / Qt 源代码
+   The corresponding source code of the Qt libraries is available from The Qt Company:
+     https://download.qt.io/archive/qt/6.11/6.11.2/single/   (qt-everywhere-src-6.11.2.tar.xz)
+     https://code.qt.io/cgit/qt/qt5.git/   (git repository, tag v6.11.2)
+   Written offer: for at least three years from the date you received this program, the developer will
+   also give you a copy of the corresponding Qt source code on request, for a charge no more than the cost of
+   physically doing so. Write to nizhenhuan17@gmail.com .
+   书面承诺：自你取得本程序之日起至少三年内，你可发邮件向开发者索取对应的 Qt 源代码，仅收取实际复制/邮寄成本。
+
+3. Replacing the Qt libraries / 替换 Qt 库
+   You may modify Qt and use your modified libraries with this program, or use a different build of the same
+   Qt version, as the LGPL v3 allows:
+   a) Build or obtain Qt 6.11.2 for MinGW-w64 64-bit (same major.minor version and the same compiler ABI as
+      the shipped one; the shipped build uses the MinGW 13.1 64-bit toolchain of the Qt installer).
+   b) Close the program. Copy your own Qt6*.dll files and plugin folders over the files with the same names in
+      the installation folder (back up the originals first).
+   c) Start the program. It loads Qt dynamically and needs no re-linking.
+   The program's own code is not under the LGPL; it is provided under the Terms of Use. Nothing in the Terms
+   of Use restricts the rights the LGPL gives you for Qt, including modification of Qt for your own use and
+   reverse engineering for debugging such modifications.
+   程序自身代码不属于 LGPL，使用条款不限制 LGPL 赋予你对 Qt 的权利（包括为调试你对 Qt 的修改而进行逆向工程）。
+
+4. Linking information for relinking the program itself / 重新链接
+   The program is linked dynamically against Qt, so replacing the DLLs (step 3) is enough. If you want to
+   relink the program's own object files against a modified Qt, the developer will provide them on request
+   (nizhenhuan17@gmail.com), under the Terms of Use, only for that purpose.
+
+5. Notices / 声明
+   Qt is a trademark of The Qt Company Ltd. Copyright of Qt belongs to The Qt Company Ltd. and other
+   contributors. Qt licence overview: https://www.qt.io/licensing/ and
+   https://doc.qt.io/qt-6/lgpl.html . Third-party code inside Qt: https://doc.qt.io/qt-6/licenses-used-in-qt.html

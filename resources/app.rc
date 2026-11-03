@@ -1,0 +1,31 @@
+#include <winver.h>
+IDI_ICON1 ICON "icon/app.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,1,0
+ PRODUCTVERSION 1,0,1,0
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "CompanyName", "AGcov (BI2QYN)\0"
+            VALUE "FileDescription", "NadirStation GK-2A HRIT Decoder\0"
+            VALUE "FileVersion", "1.0.1\0"
+            VALUE "InternalName", "NadirStation_GK2A-HRIT_decoder\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 AGcov (BI2QYN)\0"
+            VALUE "OriginalFilename", "NadirStation_GK2A-HRIT_decoder.exe\0"
+            VALUE "ProductName", "NadirStation GK-2A HRIT Decoder\0"
+            VALUE "ProductVersion", "1.0.1\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200
+    END
+END

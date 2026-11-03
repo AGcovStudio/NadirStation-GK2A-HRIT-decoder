@@ -1,0 +1,243 @@
+﻿NadirStation GK-2A HRIT 解码器 / NadirStation GK-2A HRIT Decoder
+用户协议与免责声明 / Terms of Use and Disclaimer
+版本 1.0.1 · 2026-11-02 · 开发者 / Developer: AGcov（BI2QYN）
+
+========================================================================
+
+【中文】
+
+重要提示
+
+请在安装或使用本软件之前仔细阅读本《用户协议与免责声明》（以下简称“本协议”）。点击“我接受”、安装、复制或以任何方式使用本软件，即表示你已阅读、理解并同意受本协议全部条款约束。如果你不同意本协议的任何内容，请不要安装或使用本软件，并立即删除已获得的副本。
+
+本协议中涉及责任限制、免责和风险承担的条款对你的权利影响重大，请特别留意。本协议在适用法律允许的范围内适用，不影响你依法享有的、不能通过合同排除的权利。
+
+1. 软件是什么、不是什么
+
+1.1 NadirStation GK-2A HRIT 解码器（以下简称“本软件”）由 AGcov（BI2QYN）（以下简称“开发者”）开发，是一个离线工具：它读取你已经录制好的基带 IQ 文件（.cs8、.cs16、.wav），按照公开的 GK-2A（千里眼-2A，GEO-KOMPSAT-2A）HRIT 下行链路规范进行解调和纠错，重组出 HRIT 文件（文件结构遵循 CGMS LRIT/HRIT 全球规范），并由这些文件生成图像。
+
+1.2 本软件只读取文件，不控制任何无线电硬件，不具备发射功能，其自身代码也不包含联网功能（见第 7 条）。
+
+1.3 本软件是业余爱好者的学习研究项目，不是气象业务系统，不是经过认证的产品，与韩国气象厅（KMA）、国家气象卫星中心（NMSC）、卫星运营方或任何设备/软件厂商均无隶属、授权、认可或合作关系。文中出现的名称、商标和标识归各自所有者所有，仅用于说明兼容性。
+
+1.4 本协议的一方是个人开发者 AGcov（BI2QYN）（以业余无线电呼号署名的自然人，联系方式见第 11.5 条），另一方是安装或使用本软件的你。
+
+2. 许可范围
+
+2.1 在遵守本协议的前提下，开发者授予你一项个人的、非独占的、不可转让的、免费的许可，在你自己的计算机上安装和使用本软件，用于个人学习、研究和业余无线电爱好。
+
+2.2 未经开发者书面许可，你不得：(a) 出售、出租、转授权本软件，或以收费方式提供本软件及其产出物的获取渠道；(b) 去除或修改本软件中的开发者署名、版权和许可声明；(c) 对本软件进行反向工程、反编译或反汇编，但适用法律明确允许且不能被合同排除的情形，以及为调试你对第三方开源库（例如 Qt）所做的修改而进行的反向工程除外；(d) 将本软件用于违法目的。
+
+2.3 本协议不限制、也不取代你依适用法律享有的法定权利，以及你依第三方组件各自的开源许可证（包括 GNU LGPL）对相应组件享有的权利。第三方组件按其各自的许可证使用，见第 9 条。
+
+3. 合规责任由你自己承担
+
+3.1 接收卫星信号、保存和使用其中的数据，可能受你所在国家或地区的无线电管理、电信、数据和版权法规约束。你应当自行了解并遵守这些法规，并只处理你有权持有和使用的录音文件。
+
+3.2 GK-2A 的数据和产品可能受其各自权利人或数据提供方（包括韩国气象厅 KMA 等）设定的知识产权、许可条件、署名要求和再分发限制约束。你应当自行查阅并遵守相应的数据政策，特别是关于再分发、商业使用和署名的要求。本软件的输出（图像、产品、元数据）不因经过本软件处理而改变其权利归属。
+
+3.3 本软件由业余爱好者分享，不提供也不应被用于绕过任何访问控制。部分 HRIT 图像分段是加密的，解密密钥（EncryptionKeyMessage.bin）由卫星运营方按其公布的条件向用户发放。本软件不包含任何密钥，开发者也不提供密钥。密钥的获取、使用和保管须符合卫星运营方实际发布的授权条件，你应当自行核实这些条件；未经权利人允许，你不得公开传播密钥。
+
+3.4 你对自己使用本软件的方式及由此产生的一切后果负责，包括但不限于对录音文件、输出文件的保存、传播和使用。
+
+4. 禁止的关键用途
+
+4.1 本软件的解码结果可能不完整、不准确或有延迟，原因包括但不限于信号弱、录音质量差、软件缺陷、算法限制和卫星/运营方的变更。
+
+4.2 严禁将本软件及其产出物用于任何一旦出错可能危及人身、财产、公共安全或造成重大损失的场合，包括但不限于：气象预报与灾害预警的决策依据、航空航海导航与调度、救援与应急指挥、医疗、工业控制和金融交易。
+
+4.3 本软件及其产出物不能替代气象部门或其他官方机构发布的预报、预警和公告。需要权威气象信息时，请使用官方发布的产品和渠道。
+
+5. 免责声明（按“现状”提供）
+
+5.1 在适用法律允许的最大范围内，本软件按“现状”和“可获得”的状态提供，不附带任何明示或暗示的保证，包括但不限于对适销性、特定用途适用性、准确性、完整性、可靠性、持续可用性、不侵犯第三方权利以及无错误、无病毒、不中断运行的保证。
+
+5.2 开发者不保证本软件能够在你的计算机、录音或信号条件下成功解码，不保证解码结果与官方产品一致，也不保证本软件与未来的卫星链路变更保持兼容。
+
+5.3 本软件的测试主要基于有限的录音和模拟数据。开发者没有、也无法在所有硬件、操作系统、驱动和信号条件下测试。你应当自行验证输出结果是否满足你的用途。
+
+5.4 本软件会在你选择的文件夹中创建和写入文件（图像、元数据、日志），并会读取你选择的录音和密钥文件。请在使用前备份重要数据，并确认输出文件夹的选择无误。
+
+5.5 本条不排除或限制依法不能排除或限制的保证、责任，也不影响你依法享有的权利。
+
+6. 责任限制与赔偿
+
+6.1 在适用法律允许的最大范围内，开发者及其贡献者不对因使用或无法使用本软件而产生的间接、附带、特殊、惩罚性或后果性损害承担责任，包括利润或业务损失、因数据丢失或损坏造成的间接损失、第三方索赔，即使开发者已被告知发生此类损害的可能性。
+
+6.2 在适用法律允许的最大范围内，开发者的全部责任总额以你为获得本软件所实际支付的费用（如有）为上限。本限制不适用于依法不能排除或限制的责任。
+
+6.3 如果因你违反本协议或适用法律（包括未经许可传播数据或密钥），导致第三方向开发者提出索赔或使开发者受到处罚，你应当在依法应由你承担责任的范围内，赔偿开发者因此遭受的合理损失和费用。
+
+6.4 本协议中的任何内容都不排除或限制依法不能排除或限制的责任，包括因故意或重大过失造成人身损害或财产损失的责任。
+
+7. 隐私
+
+7.1 本软件自身的代码不包含统计、遥测、广告、自动更新或任何网络通信功能，不收集、不上传你的文件、路径、使用记录或个人信息，只会用系统默认程序打开你本机的文件夹或文件。安装包随附的 Qt 运行库中包含网络相关的库文件（由部署工具自动带入），本软件不使用其网络功能。
+
+7.2 本软件可能在你选择的输出文件夹中写入含有录音文件名、观测时间和处理统计信息的元数据文件。把这些文件分享给他人之前，请自行检查其中是否含有你不愿公开的信息。
+
+7.3 提供本软件下载的网站可能保存标准的服务器访问日志（访问时间、IP 地址、请求的页面和浏览器标识），仅用于运维、安全防护和排错，不用于用户画像或营销，也不出售或提供给第三方（法律要求的除外），并按服务器的常规日志轮转策略保留。如果你想查询或删除与你有关的日志，可按第 11.5 条联系开发者。
+
+7.4 你主动发给开发者的反馈邮件（包括你附上的日志或截图）只用于排查问题。请不要在邮件中附带密钥文件或你不愿公开的信息。
+
+8. 知识产权
+
+8.1 本软件的界面、整合代码和文档的版权归 AGcov（BI2QYN）所有。第三方组件（见第 9 条）的版权和许可证归其各自权利人，本协议不转让、也不改变这些权利。本软件所含的解码算法实现基于公开的 GK-2A HRIT/LRIT 技术规范编写。
+
+8.2 你对自己的录音文件及合法取得的数据保留你原有的权利。
+
+9. 第三方组件
+
+本软件使用以下第三方组件，它们各自的版权归其所有者，并按各自的许可证提供。许可证全文、组件版本和链接方式见安装目录中的 LICENSES 文件夹和 THIRD_PARTY_NOTICES.txt：
+
+• Qt 6.11（随安装包提供的 Qt6Core、Qt6Gui、Qt6Widgets、Qt6Svg、Qt6Network 库，以及 platforms、styles、imageformats、iconengines、generic、networkinformation、tls 等插件）：以 GNU LGPL v3 许可。本软件以动态链接方式使用 Qt，没有修改 Qt 的源代码。你有权按 LGPL v3 替换随附的 Qt 库；怎样取得对应的 Qt 源代码、怎样替换，见安装目录中的 LGPL_COMPLIANCE.txt。Qt 库内部使用的部分第三方代码（如 zlib、libpng、FreeType、HarfBuzz、PCRE2 等）另有各自的许可证，见 Qt 官方的许可说明 https://doc.qt.io/qt-6/licenses-used-in-qt.html 。
+
+• OpenJPEG 2.5.3：BSD 2-Clause 许可，用于解码 JPEG 2000 数据（静态链接）。
+
+• libjpeg-turbo 3.1.2：BSD-3-Clause / IJG / zlib 许可，用于解码 JPEG 数据（静态链接）。
+
+• Natural Earth 公有领域数据（国家边界，采用中国视角版本）：用于在产品图上叠加边界线。
+
+• MinGW-w64 运行库（libstdc++、libgcc、winpthreads）：GPL v3 加 GCC 运行库例外条款 / MIT 类许可。
+
+这些组件的许可并不因本协议而改变；本协议第 5、6 条的免责和责任限制同样适用于它们，但以适用法律和各组件许可证允许的范围为限。
+
+10. 终止与更新
+
+10.1 如果你违反本协议，你的许可自动终止，你应当停止使用并删除本软件的所有副本。第 3、4、5、6、9、11 条在终止后继续有效。
+
+10.2 开发者可以随时修改、暂停或停止提供本软件或网站，而无需事先通知，也无需承担责任。开发者不承担提供支持、维护或更新的义务。
+
+10.3 开发者可以更新本协议。更新后的协议适用于新的安装，以及明确表示接受更新版本的用户；除适用法律另有允许外，你此前已接受版本之下的既有使用，仍适用你当时接受的协议。
+
+11. 其他
+
+11.1 适用法律与争议解决：本协议的订立、效力、解释和履行适用中华人民共和国法律（不包括其冲突法规则）。因本协议产生的争议，双方应友好协商；协商不成的，由依适用法律有管辖权的法院管辖。任何关于法院管辖的约定，仅在适用法律允许的范围内有效。
+
+11.2 可分割性：如果本协议的任何条款被认定为无效或不可执行，该条款应在最小必要范围内被修改或删除，其余条款继续有效。
+
+11.3 完整协议与语言：本协议是你与开发者就本软件达成的完整协议。本协议有中文和英文两个版本，意在表达相同的含义；两者不一致时以中文版为准。
+
+11.4 署名：AGcov（BI2QYN）。本软件界面和网站按此署名。
+
+11.5 联系方式：报告错误、提出版权或隐私方面的问题，请发邮件到 nizhenhuan17@gmail.com 。
+
+========================================================================
+
+[English]
+
+Important
+
+Please read this Terms of Use and Disclaimer (the "Agreement") carefully before installing or using the software. By clicking "I accept", installing, copying or using the software in any way you confirm that you have read, understood and agreed to all of it. If you do not agree, do not install or use the software and delete any copy you have.
+
+The clauses on liability, disclaimers and assumption of risk affect your rights significantly; please read them with particular care. This Agreement applies to the extent permitted by applicable law and does not affect rights you have by law that cannot be excluded by contract.
+
+1. What the software is and is not
+
+1.1 NadirStation GK-2A HRIT Decoder (the "Software") is developed by AGcov（BI2QYN） (the "Developer"). It is an offline tool: it reads baseband IQ recordings that you already have (.cs8, .cs16, .wav) and, following the public GK-2A (GEO-KOMPSAT-2A) HRIT downlink specification, demodulates them, applies error correction, reassembles HRIT files (whose structure follows the CGMS LRIT/HRIT Global Specification) and builds images from them.
+
+1.2 The Software only reads files. It does not control any radio hardware, has no transmit function, and its own code contains no networking (see Section 7).
+
+1.3 The Software is an amateur learning and research project. It is not an operational meteorological system, it is not a certified product, and it is not affiliated with, authorised, endorsed or sponsored by the Korea Meteorological Administration (KMA), the National Meteorological Satellite Center (NMSC), the satellite operator, or any hardware or software vendor. Names, trademarks and logos mentioned belong to their owners and are used only to describe compatibility.
+
+1.4 The parties to this Agreement are the individual developer AGcov（BI2QYN） (a natural person credited by amateur-radio call sign; contact details in Section 11.5) and you, the person who installs or uses the Software.
+
+2. Licence
+
+2.1 Subject to this Agreement, the Developer grants you a personal, non-exclusive, non-transferable, royalty-free licence to install and use the Software on your own computer for personal learning, research and amateur-radio hobby use.
+
+2.2 Without the Developer's written permission you may not: (a) sell, rent or sublicense the Software, or charge for access to it or to its output; (b) remove or alter the Developer credit, copyright or licence notices; (c) reverse engineer, decompile or disassemble the Software, except where the law expressly allows it and the right cannot be excluded by contract, and except for reverse engineering for debugging your own modifications of third-party open-source libraries (for example Qt); (d) use the Software for any unlawful purpose.
+
+2.3 This Agreement does not limit or replace the statutory rights you have under applicable law, or the rights you have in a third-party component under that component's own open-source licence (including the GNU LGPL). Third-party components are used under their own licences; see Section 9.
+
+3. Compliance is your responsibility
+
+3.1 Receiving satellite signals and keeping and using the data they carry may be regulated by radio, telecommunications, data and copyright law where you live. You must find out about and obey these rules, and process only recordings that you are entitled to hold and use.
+
+3.2 GK-2A data and products may be subject to intellectual property rights, licensing conditions, attribution requirements and redistribution restrictions imposed by their respective rights holders or data providers (including KMA). You must read and follow the applicable data policies, in particular on redistribution, commercial use and attribution. Output of the Software (images, products, metadata) does not change hands in terms of rights because it was processed by the Software.
+
+3.3 The Software is shared by an amateur and must not be used to get around any access control. Some HRIT image segments are encrypted; the key (EncryptionKeyMessage.bin) is issued to users by the satellite operator under the conditions it publishes. The Software contains no key and the Developer does not supply one. Obtaining, using and keeping a key must comply with the authorisation conditions the satellite operator actually publishes, which you must check yourself; you must not publish a key without the rights holder's permission.
+
+3.4 You are responsible for how you use the Software and for all consequences, including how you store, share and use recordings and output files.
+
+4. Prohibited critical uses
+
+4.1 Results may be incomplete, inaccurate or late, for reasons including weak signal, poor recordings, software defects, algorithmic limits and changes by the satellite operator.
+
+4.2 You must not use the Software or its output where an error could endanger life, property or public safety or cause serious loss, including: as the basis for weather forecasting or warning decisions, air or marine navigation and dispatch, rescue and emergency command, medical care, industrial control and financial trading.
+
+4.3 The Software and its output are not a substitute for forecasts, warnings and notices issued by meteorological services or other official bodies. For authoritative meteorological information use the products and channels published by the official provider.
+
+5. Disclaimer of warranty (provided "as is")
+
+5.1 To the maximum extent permitted by law the Software is provided "AS IS" and "AS AVAILABLE", without warranties of any kind, express or implied, including merchantability, fitness for a particular purpose, accuracy, completeness, reliability, continued availability, non-infringement, and freedom from errors, viruses or interruption.
+
+5.2 The Developer does not warrant that the Software will decode successfully on your computer, with your recordings or under your signal conditions, that results will match official products, or that it will remain compatible with future changes to the satellite link.
+
+5.3 Testing was based mainly on a limited set of recordings and simulated data. The Developer has not tested, and cannot test, every hardware, operating system, driver and signal condition. You are responsible for checking whether the output suits your purpose.
+
+5.4 The Software creates and writes files (images, metadata, logs) in the folder you choose and reads the recording and key files you choose. Back up important data first and check the output folder you select.
+
+5.5 This Section does not exclude or limit any warranty or liability that cannot be excluded or limited by law, and does not affect your statutory rights.
+
+6. Limitation of liability and indemnity
+
+6.1 To the maximum extent permitted by law, the Developer and contributors shall not be liable for any indirect, incidental, special, punitive or consequential damages arising from the use of or inability to use the Software, including loss of profit or business, indirect loss resulting from loss or corruption of data, and third-party claims, even if advised of the possibility of such damage.
+
+6.2 To the maximum extent permitted by applicable law, the Developer's aggregate liability shall be limited to the amount you actually paid for the Software, if any. This limitation shall not apply to liabilities that cannot lawfully be excluded or limited.
+
+6.3 If a third party makes a claim against the Developer, or the Developer is penalised, because you breached this Agreement or the law (including by distributing data or a key without permission), you shall compensate the Developer for the reasonable loss and cost this causes, to the extent that you are legally responsible for it.
+
+6.4 Nothing in this Agreement excludes or limits liability that cannot be excluded or limited by law, including liability for personal injury or property damage caused by intent or gross negligence.
+
+7. Privacy
+
+7.1 The Software's own code contains no analytics, telemetry, advertising, automatic update or any network communication, and does not collect or upload your files, paths, usage or personal information; it only asks the system to open a folder or file on your own computer. The Qt runtime that ships with the installer includes network-related library files (added automatically by the deployment tool); the Software does not use their networking functions.
+
+7.2 The Software may write metadata files containing the recording's file name, observation time and processing statistics to the output folder you chose. Check them before sharing if they contain anything you do not wish to publish.
+
+7.3 The website that offers the download may keep standard server access logs (time, IP address, requested page and browser identifier), used only for operation, security and troubleshooting, not for profiling or marketing, and not sold or passed to third parties (except where the law requires), and retained under the server's normal log-rotation policy. To ask about or request deletion of logs that relate to you, contact the Developer as in Section 11.5.
+
+7.4 Feedback e-mails you send to the Developer (including logs or screenshots you attach) are used only to investigate the problem. Do not attach key files or anything you do not wish to share.
+
+8. Intellectual property
+
+8.1 Copyright in the Software's interface, integration code and documentation belongs to AGcov（BI2QYN）. Copyright in, and licences of, the third-party components (Section 9) belong to their respective rights holders; this Agreement neither transfers nor changes them. The decoding algorithms are implemented from public GK-2A HRIT/LRIT technical specifications.
+
+8.2 You keep whatever rights you have in your own recordings and in data you obtained lawfully.
+
+9. Third-party components
+
+The Software uses the following third-party components. Copyright in them belongs to their owners and they are provided under their own licences. Full licence texts, versions and the way each is linked are in the LICENSES folder and THIRD_PARTY_NOTICES.txt in the installation folder:
+
+• Qt 6.11 (the Qt6Core, Qt6Gui, Qt6Widgets, Qt6Svg and Qt6Network libraries shipped with the installer, and plugins such as platforms, styles, imageformats, iconengines, generic, networkinformation and tls): GNU LGPL v3. The Software uses Qt as dynamic libraries and has not modified Qt's source code. You may replace the shipped Qt libraries as the LGPL provides; how to obtain the corresponding Qt source code and how to replace the libraries is described in LGPL_COMPLIANCE.txt in the installation folder. Some third-party code used inside the Qt libraries (such as zlib, libpng, FreeType, HarfBuzz and PCRE2) has its own licences; see Qt's licence notes at https://doc.qt.io/qt-6/licenses-used-in-qt.html .
+
+• OpenJPEG 2.5.3: BSD 2-Clause, for JPEG 2000 decoding (statically linked).
+
+• libjpeg-turbo 3.1.2: BSD-3-Clause / IJG / zlib licences, for JPEG decoding (statically linked).
+
+• Natural Earth public-domain data (country borders, China point-of-view version), used to draw borders on product images.
+
+• MinGW-w64 runtime (libstdc++, libgcc, winpthreads): GPL v3 with the GCC Runtime Library Exception / MIT-style licences.
+
+These licences are not changed by this Agreement; the disclaimers and limitations in Sections 5 and 6 also apply to them to the extent allowed by law and by each licence.
+
+10. Termination and changes
+
+10.1 If you breach this Agreement your licence ends automatically and you must stop using and delete all copies of the Software. Sections 3, 4, 5, 6, 9 and 11 survive termination.
+
+10.2 The Developer may change, suspend or discontinue the Software or the website at any time without notice or liability, and has no duty to provide support, maintenance or updates.
+
+10.3 The Developer may update this Agreement. Updated terms apply to new installations and to users who expressly accept the updated version. Unless applicable law permits otherwise, your existing use remains subject to the terms you previously accepted.
+
+11. General
+
+11.1 Governing law and disputes: this Agreement is governed by the laws of the People's Republic of China (excluding its conflict-of-law rules). Disputes shall first be settled by friendly negotiation, failing which they shall be resolved by a court having jurisdiction under applicable law. Any agreed choice of court is effective only to the extent permitted by applicable law.
+
+11.2 Severability: if any provision is held invalid or unenforceable it shall be modified or removed to the minimum extent necessary and the rest remains in force.
+
+11.3 Entire agreement and language: this is the entire agreement between you and the Developer about the Software. It exists in Chinese and English, which are intended to have the same meaning; if they differ, the Chinese version prevails.
+
+11.4 Credit: AGcov（BI2QYN）. The Software's interface and the website carry this credit.
+
+11.5 Contact: to report a bug or raise a copyright or privacy question, write to nizhenhuan17@gmail.com .

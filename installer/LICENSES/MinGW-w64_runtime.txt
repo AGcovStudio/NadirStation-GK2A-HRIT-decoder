@@ -1,0 +1,17 @@
+﻿MinGW-w64 runtime libraries
+===========================
+The program is built with MinGW-w64 (GCC) from the Qt installer and ships the runtime DLLs it needs
+(libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll).
+
+* libstdc++ and libgcc: GNU General Public License v3 with the GCC Runtime Library Exception, version 3.1.
+  Exception text: https://www.gnu.org/licenses/gcc-exception-3.1.html
+  The GPL v3 text is in GPL-3.0.txt in this folder. Under the Exception, programs that use these
+  runtime libraries may be distributed under terms of the program author's choice.
+* libwinpthread: MIT-style (Expat) licence of the winpthreads project of MinGW-w64
+  (https://www.mingw-w64.org/). Its licence text is part of the MinGW-w64 distribution that comes with
+  the Qt installer (Tools\mingw1310_64 ...\share\doc or the source package).
+* The exact source for these libraries is available from GCC (https://gcc.gnu.org/) and MinGW-w64
+  (https://www.mingw-w64.org/); see also LGPL_COMPLIANCE.txt for how to get any source from the developer.
+
+MinGW-w64 运行库：libstdc++、libgcc 采用 GPL v3 加 GCC 运行库例外条款 3.1（全文见上述链接）；
+libwinpthread 采用 MIT 类许可。GPL v3 全文见本文件夹的 GPL-3.0.txt。

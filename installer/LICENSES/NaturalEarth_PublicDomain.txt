@@ -1,0 +1,8 @@
+﻿Natural Earth
+=============
+Country boundaries (resources/maps/ne_10m_admin_0_countries_chn.geojson, China point-of-view version)
+and the land mask are derived from Natural Earth data. Natural Earth is in the public domain:
+https://www.naturalearthdata.com/about/terms-of-use/
+No permission is needed to use it; a credit to Natural Earth is appreciated and given here.
+
+Natural Earth（自然地球）数据：国家边界（中国视角版本）和陆地掩膜源自 Natural Earth，属公有领域。

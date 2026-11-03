@@ -1,0 +1,36 @@
+﻿NadirStation GK-2A HRIT Decoder - Third-party notices / 第三方组件声明
+=====================================================================
+Version 1.0.1. This program is (c) AGcov（BI2QYN）. It includes or links the components below. Their
+copyright belongs to their owners. Full licence texts are in the LICENSES folder next to this file.
+本程序版权归 AGcov（BI2QYN）所有。下列组件的版权归各自权利人，许可证全文见同目录的 LICENSES 文件夹。
+
+Component            Version   Licence                         How it is used / 使用方式
+-------------------  --------  ------------------------------  -----------------------------------------
+Qt (Core, Gui,       6.11.2    GNU LGPL v3                     Shipped as unmodified DLLs from the Qt
+ Widgets, Svg,                 (LICENSES\Qt_LGPL-3.0.txt,      online installer (MinGW 64-bit). The
+ Network) + plugins            GPL-3.0.txt)                    program is dynamically linked. You may
+ (platforms, styles,                                           replace them: see LGPL_COMPLIANCE.txt.
+ imageformats,
+ iconengines, generic,
+ networkinformation, tls)
+OpenJPEG             2.5.3     BSD 2-Clause                    Static library, JPEG 2000 decoding.
+                               (LICENSES\OpenJPEG_...)
+libjpeg-turbo        3.1.2     BSD-3-Clause, IJG, zlib         Static library, JPEG decoding.
+                               (LICENSES\libjpeg-turbo_...)    This software is based in part on the
+                                                               work of the Independent JPEG Group.
+Natural Earth        -         Public domain                   Country boundaries (China point of view)
+                               (LICENSES\NaturalEarth_...)     and land mask used in product images.
+MinGW-w64 runtime    -         GPL v3 + GCC Runtime Library    libstdc++-6.dll, libgcc_s_seh-1.dll,
+ (libstdc++, libgcc,           Exception 3.1 / MIT-style       libwinpthread-1.dll shipped with the
+ winpthreads)                  (LICENSES\MinGW-w64_runtime.txt) program.
+
+Third-party code inside Qt: the Qt libraries contain code under other licences (for example zlib, libpng,
+FreeType, HarfBuzz, PCRE2, double-conversion, and others). See
+https://doc.qt.io/qt-6/licenses-used-in-qt.html and the Qt source package for the full list and texts.
+Qt 库内部还含有其他许可证的第三方代码，见上述链接。
+
+"Qt" is a trademark of The Qt Company Ltd. This program is not affiliated with or endorsed by The Qt Company.
+
+Not used by the program's own code: networking. The Qt6Network library and the tls / networkinformation
+plugins are present only because the Qt deployment tool adds them; the program does not call them.
+程序自身代码不使用网络功能；Qt6Network 等库仅因部署工具自动带入而存在。
