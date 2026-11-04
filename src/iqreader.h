@@ -47,6 +47,8 @@ public:
     // Reads up to maxFrames complex samples (scaled to about +-1). Returns how many were read; 0 at the end.
     std::size_t read(std::vector<std::complex<float>>& out, std::size_t maxFrames);
     std::uint64_t position() const { return position_; }
+    // Moves to a complex-sample index (clamped to the end). False when no file is open.
+    bool seek(std::uint64_t frame);
 
 private:
     bool openWav(std::string& error);

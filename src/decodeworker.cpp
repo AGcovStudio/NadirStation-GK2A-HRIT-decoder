@@ -3,6 +3,7 @@
 #include "gk2ahritimages.h"
 #include "iqreader.h"
 #include "qtpath.h"
+#include "repair.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -12,6 +13,9 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <map>
+#include <regex>
+#include <string>
 
 namespace {
 
@@ -28,6 +32,13 @@ QString findKeyFile(const QString& chosen, const QString& inputPath, const QStri
     for (const QString& c : candidates)
         if (QFileInfo(c).isFile()) return QDir::toNativeSeparators(QFileInfo(c).absoluteFilePath());
     return {};
+}
+
+// "IMG_FD_143_SW038_20261103_062903_05.hrit" -> "20261103_062903": which observation a segment belongs to.
+std::string observationStamp(const std::string& fileName) {
+    static const std::regex re("_(\\d{8}_\\d{6})_");
+    std::smatch m;
+    return std::regex_search(fileName, m, re) ? m[1].str() : std::string();
 }
 
 }  // namespace
@@ -87,8 +98,15 @@ void DecodeWorker::run(const QString& inputPath, double manualRateHz, bool prefe
 
     // A recording is read much faster than real time, so the image worker (JPEG2000 / JPEG decoding) is the
     // slow stage: wait for it instead of letting segments be dropped.
+    // Segments that came out with holes (frames the first pass could not decode) are remembered so they can be
+    // rebuilt if the repair pass below finds the missing frames.
+    std::map<std::string, std::size_t> damaged;   // file name -> packets lost
+    std::string lastStamp;
+    pipe.setCollectFrames(true);
     const std::function<void(nadirstation::gk2a::LritFile&&)> onFile = [&](nadirstation::gk2a::LritFile&& file) {
         if (file.bytes.size() > nadirstation::gk2a::LritFileAssembler::kMaxFileBytes) return;
+        if (!file.holes.empty() || file.lostPackets > 0) damaged[file.fileName] = std::max<std::size_t>(file.lostPackets, 1);
+        lastStamp = observationStamp(file.fileName);
         for (int tries = 0; tries < 400 && !stop_.load(); ++tries) {
             if (images.queuedBytes() > (24u << 20)) {
                 QThread::msleep(25);
@@ -132,6 +150,29 @@ void DecodeWorker::run(const QString& inputPath, double manualRateHz, bool prefe
     const auto lastStats = pipe.stats();
     emit statsChanged(lastStats);
     emit progress(stopped ? static_cast<int>(1000.0 * static_cast<double>(reader.position()) / static_cast<double>(info.frames)) : 1000);
+    // Repair pass: a frame that fails Reed-Solomon in one receiver setting very often passes in another. Go back
+    // to the recording around each gap, decode it again with other settings, and rebuild the damaged segments.
+    if (!stopped && !damaged.empty()) {
+        emit logLine(QStringLiteral("有 %1 个分段因丢帧受损，正在回头重解丢失的帧…").arg(damaged.size()));
+        auto frames = std::move(pipe.collectedFrames());
+        const auto rep = hritapp::repairFrames(
+            reader, frames, [this] { return stop_.load(); },
+            [this](const std::string& m) { emit logLine(QString::fromUtf8(m.c_str())); });
+        if (rep.framesRecovered > 0) {
+            int rebuilt = 0, skipped = 0;
+            hritapp::HritPipeline::assembleFrames(frames, [&](nadirstation::gk2a::LritFile&& f) {
+                const auto it = damaged.find(f.fileName);
+                if (it == damaged.end()) return;                                  // it was fine the first time
+                if (f.lostPackets >= it->second && !f.holes.empty()) return;      // nothing gained
+                if (observationStamp(f.fileName) != lastStamp) { ++skipped; return; }   // an earlier observation is already closed
+                onFile(std::move(f));
+                ++rebuilt;
+            });
+            emit logLine(QStringLiteral("已用找回的帧重新合成 %1 个分段%2。")
+                             .arg(rebuilt)
+                             .arg(skipped > 0 ? QStringLiteral("（另有 %1 个属于较早的观测，未能重新合成）").arg(skipped) : QString()));
+        }
+    }
     emit logLine(QStringLiteral("数据读取完毕，正在合成并保存图像（大幅图像可能需要几十秒）…"));
     images.drain();
     images.requestFinalize();

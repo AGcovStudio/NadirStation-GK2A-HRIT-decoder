@@ -1,7 +1,7 @@
 ﻿; Inno Setup 6 script - NadirStation GK-2A HRIT Decoder
 ; Build with scripts\build_release.bat (it creates the "dist" folder first), or open this file in Inno Setup.
 #define MyAppName "NadirStation GK-2A HRIT Decoder"
-#define MyAppVersion "1.0.4"
+#define MyAppVersion "1.0.5"
 #define MyAppPublisher "AGcov（BI2QYN）"
 #define MyAppExe "NadirStation_GK2A-HRIT_decoder.exe"
 #define DistDir "..\dist"

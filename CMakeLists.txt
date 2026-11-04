@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(NadirStation_GK2A_HRIT_Decoder VERSION 1.0.4 LANGUAGES C CXX)
+project(NadirStation_GK2A_HRIT_Decoder VERSION 1.0.5 LANGUAGES C CXX)
 
 # MinGW Makefiles are single-configuration generators: default to Release so the per-sample DSP is optimised.
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
@@ -65,7 +65,7 @@ add_dependencies(nadir_turbojpeg nadir_jpeg_build)
 
 # ---- Qt-free receive chain: reader + demodulator + framing + LRIT file assembly ---------------------------------
 add_library(hrit_core STATIC
-    src/iqreader.cpp src/pipeline.cpp
+    src/iqreader.cpp src/pipeline.cpp src/repair.cpp
     src/dsp.cpp src/gk2adecoder.cpp src/gk2adatalink.cpp src/gk2ahrit.cpp)
 target_include_directories(hrit_core PUBLIC src)
 target_compile_options(hrit_core PRIVATE ${HRIT_WARN})

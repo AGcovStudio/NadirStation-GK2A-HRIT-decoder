@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <utility>
 
@@ -610,6 +611,101 @@ int rsCorrectCodeword(std::array<std::uint8_t, kRsN>& c) {
     return found;
 }
 
+
+// Errors-and-erasures correction of one codeword. `eras` lists array indices (0 = x^254) whose
+// bytes are doubtful. Works while 2 * (unknown errors) + erasures <= 32. Returns the number of
+// symbols changed, or -1. The result is only accepted by the caller after a full syndrome check.
+int rsCorrectCodewordErasures(std::array<std::uint8_t, kRsN>& c, const std::vector<int>& eras) {
+    const Gf256& g = gf();
+    const auto& products = rsRootProducts();
+    const int f = static_cast<int>(eras.size());
+    if (f > kRsParity) return -1;
+    std::array<std::uint8_t, kRsParity> s{};
+    bool clean = true;
+    for (int k = 0; k < kRsParity; ++k) {
+        std::uint8_t acc = 0;
+        for (int i = 0; i < kRsN; ++i) acc = static_cast<std::uint8_t>(products[k][acc] ^ c[static_cast<std::size_t>(i)]);
+        s[static_cast<std::size_t>(k)] = acc;
+        if (acc != 0) clean = false;
+    }
+    if (clean) return 0;
+    // Erasure locator: prod (1 - X_e x), X_e = beta^j, j = 254 - index.
+    std::array<std::uint8_t, kRsParity + 1> lambda{}, prev{}, tmp{};
+    lambda[0] = 1;
+    for (int e = 0; e < f; ++e) {
+        const std::uint8_t X = betaPow(g, kRsN - 1 - eras[static_cast<std::size_t>(e)]);
+        for (int i = e + 1; i >= 1; --i)
+            lambda[static_cast<std::size_t>(i)] ^= g.mul(X, lambda[static_cast<std::size_t>(i - 1)]);
+    }
+    prev = lambda;
+    int l = f, m = 1;
+    std::uint8_t b = 1;
+    for (int n = f; n < kRsParity; ++n) {
+        std::uint8_t d = 0;
+        for (int i = 0; i <= l && i <= n; ++i) d ^= g.mul(lambda[static_cast<std::size_t>(i)], s[static_cast<std::size_t>(n - i)]);
+        if (d == 0) { ++m; continue; }
+        const std::uint8_t coef = g.mul(d, gfInv(g, b));
+        tmp = lambda;
+        for (int i = 0; i + m <= kRsParity; ++i)
+            lambda[static_cast<std::size_t>(i + m)] ^= g.mul(coef, prev[static_cast<std::size_t>(i)]);
+        if (2 * l <= n + f) {
+            l = n + 1 - l + f;
+            prev = tmp;
+            b = d;
+            m = 1;
+        } else {
+            ++m;
+        }
+    }
+    // Spare redundancy: each unknown error costs two parity symbols and each erasure one. Leave
+    // at least 8 unused, otherwise a wrong word is as likely to come out "corrected" as a right
+    // one (at 32 erasures every word is a codeword). 8 spare symbols put a false accept near
+    // 2^-64.
+    if (l == 0 || l > kRsParity || (l - f) * 2 + f + 8 > kRsParity) return -1;
+    std::array<int, kRsParity> powers{};
+    int found = 0;
+    for (int j = 0; j < kRsN; ++j) {
+        const std::uint8_t xinv = betaPow(g, -j);
+        std::uint8_t v = 0, xp = 1;
+        for (int i = 0; i <= l; ++i) {
+            v ^= g.mul(lambda[static_cast<std::size_t>(i)], xp);
+            xp = g.mul(xp, xinv);
+        }
+        if (v == 0) {
+            if (found == kRsParity) return -1;
+            powers[static_cast<std::size_t>(found++)] = j;
+        }
+    }
+    if (found != l) return -1;
+    std::array<std::uint8_t, kRsParity> omega{};
+    for (int i = 0; i < kRsParity; ++i) {
+        std::uint8_t acc = 0;
+        for (int k = 0; k <= std::min(i, l); ++k)
+            acc ^= g.mul(lambda[static_cast<std::size_t>(k)], s[static_cast<std::size_t>(i - k)]);
+        omega[static_cast<std::size_t>(i)] = acc;
+    }
+    for (int e = 0; e < found; ++e) {
+        const int j = powers[static_cast<std::size_t>(e)];
+        const std::uint8_t xinv = betaPow(g, -j);
+        std::uint8_t num = 0, xp = 1;
+        for (int i = 0; i < kRsParity; ++i) {
+            num ^= g.mul(omega[static_cast<std::size_t>(i)], xp);
+            xp = g.mul(xp, xinv);
+        }
+        std::uint8_t den = 0;
+        xp = 1;
+        const std::uint8_t xinv2 = g.mul(xinv, xinv);
+        for (int i = 1; i <= l; i += 2) {
+            den ^= g.mul(lambda[static_cast<std::size_t>(i)], xp);
+            xp = g.mul(xp, xinv2);
+        }
+        if (den == 0) return -1;
+        const std::uint8_t scale = betaPow(g, j * (1 - kRsFirstRoot));
+        c[static_cast<std::size_t>(kRsN - 1 - j)] ^= g.mul(g.mul(num, gfInv(g, den)), scale);
+    }
+    return found;
+}
+
 }  // namespace
 
 int rsCorrect(std::vector<uint8_t>& cadu, int interleaveDepth) {
@@ -885,7 +981,6 @@ void LritDecoder::assembleAt(std::size_t bitOffset, bool inverted, int asmErrors
 // rounds. The known marker bits at both ends of the frame are used the same way.
 bool LritDecoder::rescueFrame(std::size_t bitOffset, bool inverted, int asmErrors, std::vector<uint8_t>& plain) {
     constexpr std::size_t kFrameBits = static_cast<std::size_t>(kCaduBytes) * 8;
-    constexpr int kBonus = 400;
     constexpr int kMaxRounds = 6;
     if (softBuf_.size() < 2 * (bitOffset + kFrameBits)) return false;
     const std::size_t avail = softBuf_.size() / 2 - bitOffset;
@@ -905,31 +1000,114 @@ bool LritDecoder::rescueFrame(std::size_t bitOffset, bool inverted, int asmError
     std::array<bool, kRsInterleaveDepth> have{};
     const auto& pn = kCcsdsPn;
     ViterbiDecoder vit;
-    for (int round = 0; round < kMaxRounds; ++round) {
-        const std::vector<uint8_t> bits = vit.decodeBlockWithPrior(soft.data(), pairs, prior.data(), kBonus);
-        int newly = 0;
-        for (int pos = 0; pos < kRsInterleaveDepth; ++pos) {
-            if (have[static_cast<std::size_t>(pos)]) continue;
-            std::array<std::uint8_t, kRsN> code{};
-            for (int ii = 0; ii < kRsN; ++ii) {
-                const std::size_t byteIdx = 4 + static_cast<std::size_t>(ii) * kRsInterleaveDepth + static_cast<std::size_t>(pos);
-                std::uint8_t v = 0;
-                for (int i = 0; i < 8; ++i) v = static_cast<std::uint8_t>((v << 1) | bits[byteIdx * 8 + static_cast<std::size_t>(i)]);
-                v = static_cast<std::uint8_t>(v ^ pn[(byteIdx - 4) % pn.size()]);
-                code[static_cast<std::size_t>(ii)] = kFromDualBasis[v];
+    // Variant 0 is the soft input as it came. When that leaves a codeword unsolved, the same
+    // samples are decoded again with a different metric (clipped or compressed soft values, a
+    // weaker or stronger prior). Each variant makes different mistakes, a codeword any of them
+    // gets through Reed-Solomon is a certainty and is kept, and it goes into the next variant as
+    // known bits, so the variants help one another instead of being a plain vote.
+    struct Variant { int clip; int bonus; bool sqrtMap; int noise; };
+    static constexpr Variant kVariants[] = {
+        {127, 400, false, 0}, {24, 400, false, 0}, {64, 150, false, 0}, {127, 1500, false, 0},
+        {127, 400, true, 0},  {12, 400, false, 0}, {40, 800, false, 0}, {127, 60, false, 0},
+        {18, 250, true, 0},   {90, 2500, false, 0},
+        {127, 400, false, 6}, {127, 400, false, 10}, {60, 400, false, 8}, {30, 400, false, 6},
+        {127, 800, false, 12}, {45, 300, false, 10}, {127, 400, true, 6}, {20, 400, false, 5}};
+    const std::vector<std::int8_t> soft0 = soft;
+    // Every unsolved codeword's decoded bytes, one candidate per variant: where the candidates
+    // disagree the bytes are unreliable, which is what the erasure stage below feeds on.
+    std::array<std::vector<std::array<std::uint8_t, kRsN>>, kRsInterleaveDepth> cands;
+    auto allHave = [&] { return have[0] && have[1] && have[2] && have[3]; };
+    auto adopt = [&](int pos, const std::array<std::uint8_t, kRsN>& code) {
+        solved[static_cast<std::size_t>(pos)] = code;
+        have[static_cast<std::size_t>(pos)] = true;
+        for (int ii = 0; ii < kRsN; ++ii) {
+            const std::size_t byteIdx = 4 + static_cast<std::size_t>(ii) * kRsInterleaveDepth + static_cast<std::size_t>(pos);
+            const std::uint8_t v = static_cast<std::uint8_t>(kToDualBasis[code[static_cast<std::size_t>(ii)]] ^ pn[(byteIdx - 4) % pn.size()]);
+            for (int i = 0; i < 8; ++i) prior[byteIdx * 8 + static_cast<std::size_t>(i)] = static_cast<std::int8_t>((v >> (7 - i)) & 1);
+        }
+    };
+    for (int sweep = 0; sweep < 2 && !allHave(); ++sweep) {
+        for (const Variant& var : kVariants) {
+            if (allHave()) break;
+            std::uint32_t lcg = 12345u + static_cast<std::uint32_t>(var.noise) * 7919u + static_cast<std::uint32_t>(sweep) * 104729u;
+            for (std::size_t i = 0; i < soft0.size(); ++i) {
+                int v = soft0[i];
+                if (var.sqrtMap) {
+                    const int a2 = std::abs(v);
+                    const int r = static_cast<int>(std::sqrt(static_cast<double>(a2)) * 11.2);
+                    v = v < 0 ? -r : r;
+                }
+                if (var.noise) {
+                    lcg = lcg * 1664525u + 1013904223u;
+                    v += static_cast<int>((lcg >> 16) % static_cast<std::uint32_t>(2 * var.noise + 1)) - var.noise;
+                }
+                soft[i] = static_cast<std::int8_t>(std::max(-var.clip, std::min(var.clip, v)));
             }
-            if (rsCorrectCodeword(code) < 0) continue;
-            solved[static_cast<std::size_t>(pos)] = code;
-            have[static_cast<std::size_t>(pos)] = true;
-            ++newly;
-            for (int ii = 0; ii < kRsN; ++ii) {
-                const std::size_t byteIdx = 4 + static_cast<std::size_t>(ii) * kRsInterleaveDepth + static_cast<std::size_t>(pos);
-                const std::uint8_t v = static_cast<std::uint8_t>(kToDualBasis[code[static_cast<std::size_t>(ii)]] ^ pn[(byteIdx - 4) % pn.size()]);
-                for (int i = 0; i < 8; ++i) prior[byteIdx * 8 + static_cast<std::size_t>(i)] = static_cast<std::int8_t>((v >> (7 - i)) & 1);
+            for (int round = 0; round < kMaxRounds; ++round) {
+                const std::vector<uint8_t> bits = vit.decodeBlockWithPrior(soft.data(), pairs, prior.data(), var.bonus);
+                int newly = 0;
+                for (int pos = 0; pos < kRsInterleaveDepth; ++pos) {
+                    if (have[static_cast<std::size_t>(pos)]) continue;
+                    std::array<std::uint8_t, kRsN> code{};
+                    for (int ii = 0; ii < kRsN; ++ii) {
+                        const std::size_t byteIdx = 4 + static_cast<std::size_t>(ii) * kRsInterleaveDepth + static_cast<std::size_t>(pos);
+                        std::uint8_t v = 0;
+                        for (int i = 0; i < 8; ++i) v = static_cast<std::uint8_t>((v << 1) | bits[byteIdx * 8 + static_cast<std::size_t>(i)]);
+                        v = static_cast<std::uint8_t>(v ^ pn[(byteIdx - 4) % pn.size()]);
+                        code[static_cast<std::size_t>(ii)] = kFromDualBasis[v];
+                    }
+                    auto raw = code;
+                    if (rsCorrectCodeword(code) < 0) {
+                        if (round == 0 || cands[static_cast<std::size_t>(pos)].empty()) cands[static_cast<std::size_t>(pos)].push_back(raw);
+                        continue;
+                    }
+                    adopt(pos, code);
+                    ++newly;
+                }
+                if (allHave()) break;
+                if (newly == 0) break;
             }
         }
-        if (have[0] && have[1] && have[2] && have[3]) break;
-        if (newly == 0) break;
+        // Erasure stage. The bytes the variants disagree on are declared erasures; a Reed-Solomon
+        // codeword tolerates 32 of them (or fewer together with real errors), which turns many
+        // more wrong bytes than the 16 an errors-only decoder takes into a correctable pattern.
+        for (int pos = 0; pos < kRsInterleaveDepth; ++pos) {
+            if (have[static_cast<std::size_t>(pos)]) continue;
+            const auto& cl = cands[static_cast<std::size_t>(pos)];
+            if (cl.size() < 3) continue;
+            std::array<std::uint8_t, kRsN> base{};
+            std::array<int, kRsN> minority{};
+            for (int ii = 0; ii < kRsN; ++ii) {
+                int cnt[256] = {0};
+                int bestv = 0;
+                for (const auto& cc : cl) { const int v = cc[static_cast<std::size_t>(ii)]; if (++cnt[v] > cnt[bestv]) bestv = v; }
+                base[static_cast<std::size_t>(ii)] = static_cast<std::uint8_t>(bestv);
+                minority[static_cast<std::size_t>(ii)] = static_cast<int>(cl.size()) - cnt[bestv];
+            }
+            for (int thr = 1; thr <= static_cast<int>(cl.size()) && !have[static_cast<std::size_t>(pos)]; ++thr) {
+                std::vector<int> er;
+                for (int ii = 0; ii < kRsN; ++ii) if (minority[static_cast<std::size_t>(ii)] >= thr) er.push_back(ii);
+                if (er.empty() || er.size() > 32) continue;
+                auto code = base;
+                if (rsCorrectCodewordErasures(code, er) < 0) continue;
+                auto chk = code;
+                if (rsCorrectCodeword(chk) != 0) continue;
+                adopt(pos, code);
+            }
+            // The first candidate as the base as well: the unmodified metric is the best single guess.
+            if (!have[static_cast<std::size_t>(pos)]) {
+                for (int thr = 1; thr <= static_cast<int>(cl.size()) && !have[static_cast<std::size_t>(pos)]; ++thr) {
+                    std::vector<int> er;
+                    for (int ii = 0; ii < kRsN; ++ii) if (minority[static_cast<std::size_t>(ii)] >= thr) er.push_back(ii);
+                    if (er.empty() || er.size() > 32) continue;
+                    auto code = cl[0];
+                    if (rsCorrectCodewordErasures(code, er) < 0) continue;
+                    auto chk = code;
+                    if (rsCorrectCodeword(chk) != 0) continue;
+                    adopt(pos, code);
+                }
+            }
+        }
     }
     if (!(have[0] && have[1] && have[2] && have[3])) return false;
     std::vector<uint8_t> out = plain;

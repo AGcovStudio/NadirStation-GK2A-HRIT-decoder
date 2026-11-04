@@ -233,6 +233,14 @@ void IqReader::close() {
     position_ = 0;
 }
 
+bool IqReader::seek(std::uint64_t frame) {
+    if (!open_) return false;
+    position_ = std::min<std::uint64_t>(frame, info_.frames);
+    file_.clear();
+    file_.seekg(static_cast<std::streamoff>(dataOffset_ + position_ * frameBytes_), std::ios::beg);
+    return static_cast<bool>(file_);
+}
+
 std::size_t IqReader::read(std::vector<std::complex<float>>& out, std::size_t maxFrames) {
     out.clear();
     if (!open_ || position_ >= info_.frames) return 0;

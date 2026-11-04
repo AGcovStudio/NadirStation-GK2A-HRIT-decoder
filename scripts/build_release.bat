@@ -17,7 +17,7 @@ set "ROOT=%~dp0.."
 pushd "%ROOT%"
 set "ROOT=%CD%"
 set "APPEXE=NadirStation_GK2A-HRIT_decoder.exe"
-set "VERSION=1.0.4"
+set "VERSION=1.0.5"
 
 echo [1/4] Configure
 cmake -S "%ROOT%" -B "%ROOT%\build" -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%QT_DIR%" || goto :fail

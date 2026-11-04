@@ -34,6 +34,7 @@ void HritPipeline::reset() {
     assembler_.setStrict(true);
     assembler_.setLossTolerant(true);   // HRIT segments are 25+ MB; one lost packet must not discard a segment
     symbols_.clear();
+    collected_.clear();
     filesCompleted_ = 0;
     snrY1_ = snrY2_ = 0.0;
     carrierOffsetHz_ = 0.0f;
@@ -42,6 +43,7 @@ void HritPipeline::reset() {
 void HritPipeline::handleFrame(nadirstation::gk2a::Cadu&& frame,
                                const std::function<void(nadirstation::gk2a::LritFile&&)>& onFile) {
     if (!frame.rsOk) return;
+    if (collect_) collected_.push_back(frame.bytes);
     for (auto& file : assembler_.feed(frame.bytes)) {
         ++filesCompleted_;
         onFile(std::move(file));
@@ -81,6 +83,16 @@ void HritPipeline::finish(const std::function<void(nadirstation::gk2a::LritFile&
         ++filesCompleted_;
         onFile(std::move(file));
     }
+}
+
+void HritPipeline::assembleFrames(const std::vector<std::vector<std::uint8_t>>& frames,
+                                  const std::function<void(nadirstation::gk2a::LritFile&&)>& onFile) {
+    nadirstation::gk2a::LritFileAssembler assembler;
+    assembler.setStrict(true);
+    assembler.setLossTolerant(true);
+    for (const auto& f : frames)
+        for (auto& file : assembler.feed(f)) onFile(std::move(file));
+    for (auto& file : assembler.flush()) onFile(std::move(file));
 }
 
 PipelineStats HritPipeline::stats() const {

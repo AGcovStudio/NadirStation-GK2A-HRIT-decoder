@@ -10,6 +10,7 @@
 
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -47,6 +48,12 @@ public:
     // End of the recording: wait for the link-decoder thread and hand over what is left.
     void finish(const std::function<void(nadirstation::gk2a::LritFile&&)>& onFile);
     PipelineStats stats() const;
+    // Keep every Reed-Solomon-checked CADU, in order, for a later repair pass (see repair.h).
+    void setCollectFrames(bool on) { collect_ = on; }
+    std::vector<std::vector<std::uint8_t>>& collectedFrames() { return collected_; }
+    // Assembles LRIT files from a list of CADUs the way the receive chain does (strict, loss-tolerant).
+    static void assembleFrames(const std::vector<std::vector<std::uint8_t>>& frames,
+                               const std::function<void(nadirstation::gk2a::LritFile&&)>& onFile);
     double sampleRate() const { return sampleRate_; }
 
 private:
@@ -60,6 +67,8 @@ private:
     float carrierOffsetHz_ = 0.0f;
     double sampleRate_ = 0.0;
     bool configured_ = false;
+    bool collect_ = false;
+    std::vector<std::vector<std::uint8_t>> collected_;
 };
 
 }  // namespace hritapp
