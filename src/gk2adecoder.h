@@ -35,6 +35,7 @@
 
 #include <cstddef>
 #include <complex>
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -230,6 +231,9 @@ public:
     // The frame synchroniser holds lock (marker or Reed-Solomon confirmed recently).
     bool frameLocked() const { return locked_; }
     void setRescueEnabled(bool on) { rescueEnabled_ = on; }
+    // Share of wall-clock time the soft-decision rescue may use (default 0.5, so a live receiver on
+    // its own thread keeps up with the stream); 0 or less removes the limit, for offline decoding.
+    void setRescueBudget(double ratio) { rescueRatio_ = ratio; }
     // Frames in a row without marker or Reed-Solomon pass before the lock is given up (default 1).
     void setMissLimit(int frames) { missLimit_ = frames < 1 ? 1 : frames; }
     // Start a new symbol stream (new I/Q hypothesis) without clearing the statistics.
@@ -292,6 +296,10 @@ private:
     std::vector<uint8_t> bitBuffer_;
     std::vector<std::int8_t> softBuf_;   // two quantised soft symbols per pair, pair k aligned with bitBuffer_[k] (may run ahead by the Viterbi delay)
     bool rescueEnabled_ = true;
+    double rescueRatio_ = 0.5;
+    double rescueSpent_ = 0.0;                                   // seconds spent in rescueFrame
+    std::chrono::steady_clock::time_point rescueStart_ = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point rescueDeadline_ = std::chrono::steady_clock::time_point::max();
     // One soft value held over from a feed that ended on an odd symbol
     // count, because the rate-1/2 code pairs symbols two at a time.
     float pendingSoft_ = 0.0f;   // a symbol held over from an odd-length feed
@@ -335,6 +343,7 @@ public:
     // (same tuning as the LRIT path).
     void setSoftScale(float s) { scale_ = s; }
     void setRescueEnabled(bool on) { dec_.setRescueEnabled(on); }
+    void setRescueBudget(double ratio) { dec_.setRescueBudget(ratio); }
     void setMissLimit(int frames) { dec_.setMissLimit(frames); }
 
 private:

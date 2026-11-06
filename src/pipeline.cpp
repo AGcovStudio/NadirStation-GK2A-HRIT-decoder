@@ -8,7 +8,7 @@ namespace hritapp {
 namespace {
 // Same loop bandwidths NadirStation uses for HRIT (normalised to the symbol rate).
 constexpr float kRrcAlpha = 0.5f;
-constexpr float kCarrierLoopBw = 0.0002f;
+constexpr float kCarrierLoopBw = 0.0005f;
 constexpr float kTimingLoopBw = 0.0002f;
 }  // namespace
 
@@ -21,7 +21,8 @@ bool HritPipeline::configure(double sampleRate, std::string& error) {
     sampleRate_ = sampleRate;
     demod_.configure(static_cast<float>(sampleRate), static_cast<float>(kSymbolRate), kRrcAlpha, kCarrierLoopBw,
                      kTimingLoopBw);
-    link_.setAsync(true);   // the link decoder gets its own thread, like in the live receiver
+    link_.setAsync(true);
+    link_.setRescueBudget(0.0);   // offline file decoding: no wall-clock limit on the soft-decision rescue   // the link decoder gets its own thread, like in the live receiver
     configured_ = true;
     reset();
     return true;

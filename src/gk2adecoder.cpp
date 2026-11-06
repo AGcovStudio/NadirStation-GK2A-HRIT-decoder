@@ -6,9 +6,11 @@
 // is not anchored at all, so the helpers are now written out in full, in one place.
 
 #include "gk2adecoder.h"
+#include "bcjr.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -615,7 +617,7 @@ int rsCorrectCodeword(std::array<std::uint8_t, kRsN>& c) {
 // Errors-and-erasures correction of one codeword. `eras` lists array indices (0 = x^254) whose
 // bytes are doubtful. Works while 2 * (unknown errors) + erasures <= 32. Returns the number of
 // symbols changed, or -1. The result is only accepted by the caller after a full syndrome check.
-int rsCorrectCodewordErasures(std::array<std::uint8_t, kRsN>& c, const std::vector<int>& eras) {
+int rsCorrectCodewordErasures(std::array<std::uint8_t, kRsN>& c, const std::vector<int>& eras, int spare = 8) {
     const Gf256& g = gf();
     const auto& products = rsRootProducts();
     const int f = static_cast<int>(eras.size());
@@ -661,7 +663,7 @@ int rsCorrectCodewordErasures(std::array<std::uint8_t, kRsN>& c, const std::vect
     // at least 8 unused, otherwise a wrong word is as likely to come out "corrected" as a right
     // one (at 32 erasures every word is a codeword). 8 spare symbols put a false accept near
     // 2^-64.
-    if (l == 0 || l > kRsParity || (l - f) * 2 + f + 8 > kRsParity) return -1;
+    if (l == 0 || l > kRsParity || (l - f) * 2 + f + spare > kRsParity) return -1;
     std::array<int, kRsParity> powers{};
     int found = 0;
     for (int j = 0; j < kRsN; ++j) {
@@ -931,7 +933,14 @@ void LritDecoder::assembleAt(std::size_t bitOffset, bool inverted, int asmErrors
     if (rsFixed < 0 && rescueEnabled_) {
         ++stats_.rescueTried;
         std::vector<uint8_t> better = plain;
-        if (rescueFrame(bitOffset, inverted, asmErrors, better)) {
+        using Clock = std::chrono::steady_clock;
+        const auto tStart = Clock::now();
+        const bool limited = rescueRatio_ > 0.0;
+        const bool allowed = !limited || rescueSpent_ <= rescueRatio_ * std::chrono::duration<double>(tStart - rescueStart_).count() + 0.3;
+        rescueDeadline_ = limited ? tStart + std::chrono::milliseconds(200) : Clock::time_point::max();
+        const bool rescued = allowed && rescueFrame(bitOffset, inverted, asmErrors, better);
+        if (limited) rescueSpent_ += std::chrono::duration<double>(Clock::now() - tStart).count();
+        if (rescued) {
             int diff = 0;
             for (std::size_t i = 4; i < better.size(); ++i) diff += better[i] != plain[i];
             plain = std::move(better);
@@ -1026,6 +1035,98 @@ bool LritDecoder::rescueFrame(std::size_t bitOffset, bool inverted, int asmError
             for (int i = 0; i < 8; ++i) prior[byteIdx * 8 + static_cast<std::size_t>(i)] = static_cast<std::int8_t>((v >> (7 - i)) & 1);
         }
     };
+
+    // Stage A: posterior decoding. A log-MAP pass over the frame gives every information bit a
+    // reliability. Per codeword the least reliable bytes are declared erasures in growing numbers;
+    // every candidate Reed-Solomon accepts is scored against the posteriors (the soft distance to
+    // the candidate, relative to the total reliability), and the best one that is either well inside
+    // the code's reach or very close to what the channel said is adopted. Adopted codewords become
+    // known bits for the next pass, which is where most of the gain comes from: the four codewords
+    // are byte-interleaved, so one solved codeword pins a quarter of the bits of every error burst.
+    {
+        float gain = 0.05f;   // LLR per soft unit: the demodulator normalises the symbols, so this is nearly constant over the useful range (flat optimum, 0.035..0.07)
+        // Soft distance (relative to the codeword's total reliability) below which a candidate with many erasures is believed.
+        // Calibrated on simulated streams (about 2,700 frames, no wrong frame accepted at these values); looser values let wrong codewords in.
+        constexpr float dth = 0.0100f;       // candidates with redundancy left (2*errors + erasures <= 28)
+        constexpr float dthTight = 0.0075f;  // candidates using nearly all 32 parity symbols: nothing but the soft distance checks them
+        constexpr int fstep = 2, maxIter = 10, autoAccept = 18;
+        constexpr int maxReach = 32;   // 2*errors + erasures the code can still resolve
+        constexpr int kRandomTrials = 600, kRankWindow = 24;   // candidates with 2*errors + erasures <= 18 need no soft check
+        std::vector<float> post;
+        float curGain = gain; int stall = 0;
+        for (int iter = 0; iter < maxIter && !allHave() && std::chrono::steady_clock::now() < rescueDeadline_; ++iter) {
+            BcjrK7::run(soft.data(), pairs, prior.data(), curGain, kG1, kG2, post);
+            int newly = 0;
+            for (int pos = 0; pos < kRsInterleaveDepth; ++pos) {
+                if (have[static_cast<std::size_t>(pos)]) continue;
+                std::array<std::uint8_t, kRsN> raw{};
+                std::array<float, kRsN> rel{};
+                float tot = 0.0f;
+                for (int ii = 0; ii < kRsN; ++ii) {
+                    const std::size_t byteIdx = 4 + static_cast<std::size_t>(ii) * kRsInterleaveDepth + static_cast<std::size_t>(pos);
+                    std::uint8_t v = 0; float r = 1e30f;
+                    for (int i = 0; i < 8; ++i) {
+                        const float l = post[byteIdx * 8 + static_cast<std::size_t>(i)];
+                        v = static_cast<std::uint8_t>((v << 1) | (l > 0.0f ? 1 : 0));
+                        r = std::min(r, std::fabs(l)); tot += std::fabs(l);
+                    }
+                    v = static_cast<std::uint8_t>(v ^ pn[(byteIdx - 4) % pn.size()]);
+                    raw[static_cast<std::size_t>(ii)] = kFromDualBasis[v];
+                    rel[static_cast<std::size_t>(ii)] = r;
+                }
+                std::array<int, kRsN> order{};
+                for (int ii = 0; ii < kRsN; ++ii) order[static_cast<std::size_t>(ii)] = ii;
+                std::sort(order.begin(), order.end(), [&](int a, int b) { return rel[static_cast<std::size_t>(a)] < rel[static_cast<std::size_t>(b)]; });
+                float bestScore = -1e30f; bool got = false; std::array<std::uint8_t, kRsN> bestCode{};
+                // One erasure set: decode, check, and score the result against the posteriors.
+                auto tryErasures = [&](const std::vector<int>& er) {
+                    const int F = static_cast<int>(er.size());
+                    auto code = raw;
+                    const int rcx = (F == 0 ? rsCorrectCodeword(code) : rsCorrectCodewordErasures(code, er, 0));
+                    if (rcx < 0) return;
+                    int ne = 0;
+                    { std::array<bool, kRsN> isE{}; for (int e : er) isE[static_cast<std::size_t>(e)] = true;
+                      for (int ii = 0; ii < kRsN; ++ii) if (!isE[static_cast<std::size_t>(ii)] && code[static_cast<std::size_t>(ii)] != raw[static_cast<std::size_t>(ii)]) ++ne; }
+                    if (2 * ne + F > maxReach) return;
+                    auto chk = code; if (rsCorrectCodeword(chk) != 0) return;
+                    float sc = 0.0f;
+                    for (int ii = 0; ii < kRsN; ++ii) {
+                        const std::size_t byteIdx = 4 + static_cast<std::size_t>(ii) * kRsInterleaveDepth + static_cast<std::size_t>(pos);
+                        const std::uint8_t v = static_cast<std::uint8_t>(kToDualBasis[code[static_cast<std::size_t>(ii)]] ^ pn[(byteIdx - 4) % pn.size()]);
+                        for (int i = 0; i < 8; ++i) { const float l = post[byteIdx * 8 + static_cast<std::size_t>(i)]; sc += ((v >> (7 - i)) & 1) ? l : -l; }
+                    }
+                    const float d = (tot - sc) / (2.0f * tot);
+                    if (!(2 * ne + F <= autoAccept || d < (2 * ne + F > 28 ? dthTight : dth))) return;
+                    if (sc > bestScore) { bestScore = sc; bestCode = code; got = true; }
+                };
+                for (int F = 0; F <= 32; F += fstep) tryErasures(std::vector<int>(order.begin(), order.begin() + F));
+                // Randomised erasure sets: the true errors are mostly, not always, among the least reliable bytes.
+                // Erase the least reliable F-s bytes and s more drawn from the next ranks; with a few hundred
+                // draws one of them covers enough of the real errors to land inside the code's reach.
+                if (!got) {
+                    std::uint32_t rng = 0x9E3779B9u ^ static_cast<std::uint32_t>(pos * 2654435761u) ^ static_cast<std::uint32_t>(iter * 40503u);
+                    auto next = [&rng] { rng = rng * 1664525u + 1013904223u; return rng >> 8; };
+                    std::vector<int> pool;
+                    for (int t = 0; t < kRandomTrials && !got; ++t) {
+                        if ((t & 15) == 15 && std::chrono::steady_clock::now() >= rescueDeadline_) break;
+                        const int F = 20 + 2 * static_cast<int>(next() % 7);
+                        const int sw = std::min(F, 2 + static_cast<int>(next() % 8));
+                        const int W = std::min(kRsN, F + kRankWindow);
+                        std::vector<int> er(order.begin(), order.begin() + (F - sw));
+                        pool.assign(order.begin() + (F - sw), order.begin() + W);
+                        for (int k = 0; k < sw; ++k) {
+                            const std::size_t j = static_cast<std::size_t>(k) + next() % (pool.size() - static_cast<std::size_t>(k));
+                            std::swap(pool[static_cast<std::size_t>(k)], pool[j]);
+                            er.push_back(pool[static_cast<std::size_t>(k)]);
+                        }
+                        tryErasures(er);
+                    }
+                }
+                if (got) { adopt(pos, bestCode); ++newly; }
+            }
+            if (newly == 0) { if (stall < 2) { curGain = gain * (stall == 0 ? 0.6f : 1.6f); ++stall; continue; } break; }
+        }
+    }
     for (int sweep = 0; sweep < 2 && !allHave(); ++sweep) {
         for (const Variant& var : kVariants) {
             if (allHave()) break;
@@ -1272,7 +1373,11 @@ void QpskLinkDecoder::feedSymbols(const std::vector<std::complex<float>>& symbol
         soft.push_back(k * b);
     }
     dec_.feedSoftBits(soft, false);
-    const std::size_t good = dec_.stats().cadusWithGoodRs;
+    // Evidence that the mapping is right is a frame marker found where the frame clock says it must be
+    // (verified against the next marker), or a frame Reed-Solomon passes. At low SNR Reed-Solomon
+    // alone is rare for long stretches while the markers keep coming, and judging by it threw away a
+    // working mapping every few frames.
+    const std::size_t good = dec_.stats().cadusWithGoodRs + dec_.stats().cadusWithSync;
     if (good != goodBefore_) {
         goodBefore_ = good;
         symbolsSinceGood_ = 0;
