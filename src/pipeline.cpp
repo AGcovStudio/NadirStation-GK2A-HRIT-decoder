@@ -8,7 +8,7 @@ namespace hritapp {
 namespace {
 // Same loop bandwidths NadirStation uses for HRIT (normalised to the symbol rate).
 constexpr float kRrcAlpha = 0.5f;
-constexpr float kCarrierLoopBw = 0.0005f;
+constexpr float kCarrierLoopBw = 0.0003f;
 constexpr float kTimingLoopBw = 0.0002f;
 }  // namespace
 

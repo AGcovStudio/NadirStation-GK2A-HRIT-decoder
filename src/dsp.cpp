@@ -285,8 +285,7 @@ void fftInPlace(std::vector<std::complex<double>>& a) {
     }
 }
 
-void loopGains(double bw, double& kp, double& ki) {
-    const double zeta = 0.70710678;
+void loopGains(double bw, double& kp, double& ki, double zeta = 0.70710678) {
     const double d = 1.0 + 2.0 * zeta * bw + bw * bw;
     kp = 4.0 * zeta * bw / d;
     ki = 4.0 * bw * bw / d;
@@ -841,8 +840,8 @@ void QpskDemod::configure(float sampleRate, float symbolRate, float rrcAlpha, fl
     inRate_ = sampleRate;
     symbolRate_ = symbolRate;
     alpha_ = std::clamp(rrcAlpha, 0.05f, 1.0f);
-    cBw_ = std::clamp(carrierLoopBw, 0.0002f, 0.05f);
-    tBw_ = std::clamp(timingLoopBw, 0.00005f, 0.02f);
+    cBw_ = std::clamp(carrierLoopBw, 0.00001f, 0.05f);
+    tBw_ = std::clamp(timingLoopBw, 0.00001f, 0.02f);
     decim_ = std::max(1, static_cast<int>(std::floor(sampleRate / (symbolRate * 2.5f))));
     rate_ = inRate_ / static_cast<float>(decim_);
     sps_ = static_cast<double>(rate_) / symbolRate_;
@@ -854,9 +853,15 @@ void QpskDemod::configure(float sampleRate, float symbolRate, float rrcAlpha, fl
     } else {
         aaTaps_.assign(1, 1.0f);
     }
-    lowRate_ = sps_ < 1.5;
+    lowRate_ = sps_ < 1.5 || forceMm_;
     clampFrac_ = lowRate_ ? 0.001 : 0.005;
-    half_ = static_cast<int>(std::ceil((lowRate_ ? 7.0 : 4.0) * sps_));
+    // Matched-filter span, in symbols, and whether to taper it. The transmit pulse is an RRC whose
+    // taps out to +-4 symbols matter: the raised-cosine Nyquist condition is met by a cancellation
+    // between the large centre tap and the (small but not negligible) ones at +-1..2 symbols, so a
+    // window that attenuates those breaks it and leaves intersymbol interference. Default is the
+    // long-standing 4-symbol span with a Hann taper; setMatchedFilterSymbols() changes it.
+    const double mfSym = std::max(2.0, std::fabs(static_cast<double>(mfSymbols_)));
+    half_ = static_cast<int>(std::ceil(mfSym * sps_));
     const int span = half_ + 1;
     table_.assign(static_cast<std::size_t>(2 * span * kPhases + 1), 0.0f);
     double sum = 0.0;
@@ -865,14 +870,15 @@ void QpskDemod::configure(float sampleRate, float symbolRate, float rrcAlpha, fl
         const double t = tau / sps_;                                  // symbols
         double v;
         const double a = alpha_;
-        if (std::fabs(t) > 4.0) v = 0.0;
+        if (std::fabs(t) > mfSym) v = 0.0;
         else if (std::fabs(t) < 1e-9) v = 1.0 - a + 4.0 * a / kPi;
         else if (std::fabs(std::fabs(4.0 * a * t) - 1.0) < 1e-9)
             v = a / std::sqrt(2.0) * ((1 + 2 / kPi) * std::sin(kPi / (4 * a)) + (1 - 2 / kPi) * std::cos(kPi / (4 * a)));
         else
             v = (std::sin(kPi * t * (1 - a)) + 4 * a * t * std::cos(kPi * t * (1 + a))) / (kPi * t * (1 - 16 * a * a * t * t));
-        // Hann taper over the 4-symbol half span keeps the truncated filter's sidelobes down.
-        v *= 0.5 + 0.5 * std::cos(kPi * std::clamp(t / 4.0, -1.0, 1.0));
+        // Hann taper over the half span keeps the truncated filter's sidelobes down; a negative
+        // mfSymbols_ asks for the plain truncated RRC instead.
+        if (mfSymbols_ > 0) v *= 0.5 + 0.5 * std::cos(kPi * std::clamp(t / mfSym, -1.0, 1.0));
         table_[i] = static_cast<float>(v);
         if (i % kPhases == 0) sum += v;
     }
@@ -929,8 +935,8 @@ void QpskDemod::configure(float sampleRate, float symbolRate, float rrcAlpha, fl
                 poly_[static_cast<std::size_t>((r * taps + j) * 2 + 1)] = v;
             }
     }
-    loopGains(cBw_, cKp_, cKi_);
-    loopGains(tBw_, tKp_, tKi_);
+    loopGains(cBw_, cKp_, cKi_, zeta_);
+    loopGains(tBw_, tKp_, tKi_, zeta_);
     reset();
     configured_ = true;
 }
@@ -945,7 +951,7 @@ void QpskDemod::reset() {
     ncoCount_ = 0;
     buf_.clear();
     base_ = 0.0;
-    next_ = static_cast<double>(half_ + 2);
+    next_ = static_cast<double>(half_ + 2) + timingOffset_;
     period_ = sps_;
     prevSym_ = {0, 0};
     ampAvg_ = 0.0;
@@ -984,7 +990,7 @@ void QpskDemod::acquire() {
     phase_ = 0.0;
     buf_.clear();
     base_ = 0.0;
-    next_ = static_cast<double>(half_ + 2);
+    next_ = static_cast<double>(half_ + 2) + timingOffset_;
     period_ = sps_;
     prevSym_ = {0, 0};
     ampAvg_ = 0.0;
@@ -1056,6 +1062,8 @@ DPSKResult QpskDemod::process(const std::vector<std::complex<float>>& iq) {
         }
         track(z, out);
     }
+    if (cErrN_ > 0) { cErrRms_ = std::sqrt(cErrAcc_ / static_cast<double>(cErrN_)); cErrAcc_ = 0; cErrN_ = 0; }
+    if (tErrN_ > 0) { tErrRms_ = std::sqrt(tErrAcc_ / static_cast<double>(tErrN_)); tErrAcc_ = 0; tErrN_ = 0; }
     out.carrierOffsetHz = carrierOffsetHz();
     out.timingQuality = static_cast<float>(std::clamp(1.0 - std::fabs(period_ - sps_) / sps_ * 20.0, 0.0, 1.0));
     return out;
@@ -1106,6 +1114,7 @@ void QpskDemod::track(std::complex<float> z, DPSKResult& out) {
         {
             // Small-angle phasor updates (|x| stays well under 0.1 rad); the exact values come back
             // at the next resync.
+            cErrAcc_ += ec * ec; ++cErrN_;
             const double df = cKi_ * ec / period_, dp = cKp_ * ec;
             freq_ += df;
             phase_ += dp;
@@ -1118,8 +1127,9 @@ void QpskDemod::track(std::complex<float> z, DPSKResult& out) {
                 rot_ = {rot_.real() * cs - rot_.imag() * sn, rot_.real() * sn + rot_.imag() * cs};
             }
         }
-        period_ = std::clamp(period_ + tKi_ * et, periodMin, periodMax);
-        next_ += period_ + tKp_ * et * period_;
+        tErrAcc_ += et * et; ++tErrN_;
+        period_ = freezeTiming_ ? sps_ : std::clamp(period_ + tKi_ * et, periodMin, periodMax);
+        next_ += period_ + (freezeTiming_ ? 0.0 : tKp_ * et * period_);
         prevSym_ = s;
         out.symbols.push_back(s * static_cast<float>(invAmp));
         if (!std::isfinite(freq_ + phase_ + period_)) {

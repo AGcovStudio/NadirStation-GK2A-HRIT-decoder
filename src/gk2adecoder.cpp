@@ -10,6 +10,10 @@
 
 #include <algorithm>
 #include <array>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
+#include <thread>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -525,19 +529,13 @@ inline std::uint8_t gfInv(const Gf256& g, std::uint8_t x) { return g.exp[static_
 
 // Corrects one codeword in the conventional basis, c[0] being the coefficient of x^254.
 // Returns the number of symbols changed, or -1 when the errors are beyond the code.
+bool rsSyndromes(const std::array<std::uint8_t, kRsN>& c, std::array<std::uint8_t, kRsParity>& s);
+
 int rsCorrectCodeword(std::array<std::uint8_t, kRsN>& c) {
     const Gf256& g = gf();
-    const auto& products = rsRootProducts();
+    // S_k = c(beta^(112+k)), by Horner from the highest power.
     std::array<std::uint8_t, kRsParity> s{};
-    bool clean = true;
-    for (int k = 0; k < kRsParity; ++k) {
-        // S_k = c(beta^(112+k)), by Horner from the highest power.
-        std::uint8_t acc = 0;
-        for (int i = 0; i < kRsN; ++i) acc = static_cast<std::uint8_t>(products[k][acc] ^ c[static_cast<std::size_t>(i)]);
-        s[static_cast<std::size_t>(k)] = acc;
-        if (acc != 0) clean = false;
-    }
-    if (clean) return 0;
+    if (rsSyndromes(c, s)) return 0;
 
     // Berlekamp-Massey: error locator lambda(x) = prod (1 - X_j x).
     std::array<std::uint8_t, kRsParity + 1> lambda{}, prev{}, tmp{};
@@ -617,20 +615,31 @@ int rsCorrectCodeword(std::array<std::uint8_t, kRsN>& c) {
 // Errors-and-erasures correction of one codeword. `eras` lists array indices (0 = x^254) whose
 // bytes are doubtful. Works while 2 * (unknown errors) + erasures <= 32. Returns the number of
 // symbols changed, or -1. The result is only accepted by the caller after a full syndrome check.
-int rsCorrectCodewordErasures(std::array<std::uint8_t, kRsN>& c, const std::vector<int>& eras, int spare = 8) {
-    const Gf256& g = gf();
+// Syndromes S_k = c(beta^(112+k)) of a received word. True when they are all zero (a codeword).
+bool rsSyndromes(const std::array<std::uint8_t, kRsN>& c, std::array<std::uint8_t, kRsParity>& s) {
     const auto& products = rsRootProducts();
+    // Horner for all 32 roots side by side. Each root's chain is 255 table reads that each wait for
+    // the one before; run one root at a time that wait is the whole cost, run together the 32
+    // chains overlap in the processor. Same arithmetic, several times the speed.
+    s.fill(0);
+    for (int i = 0; i < kRsN; ++i) {
+        const std::uint8_t ci = c[static_cast<std::size_t>(i)];
+        for (int k = 0; k < kRsParity; ++k)
+            s[static_cast<std::size_t>(k)] = static_cast<std::uint8_t>(products[static_cast<std::size_t>(k)][s[static_cast<std::size_t>(k)]] ^ ci);
+    }
+    bool clean = true;
+    for (int k = 0; k < kRsParity; ++k) if (s[static_cast<std::size_t>(k)] != 0) clean = false;
+    return clean;
+}
+
+// Errors-and-erasures correction of a word whose (non-zero) syndromes are already known. The rescue
+// tries many erasure sets on one received word; its syndromes do not depend on the set, so they are
+// computed once by the caller instead of once per set.
+int rsCorrectWithSyndromes(std::array<std::uint8_t, kRsN>& c, const std::array<std::uint8_t, kRsParity>& s,
+                           const std::vector<int>& eras, int spare) {
+    const Gf256& g = gf();
     const int f = static_cast<int>(eras.size());
     if (f > kRsParity) return -1;
-    std::array<std::uint8_t, kRsParity> s{};
-    bool clean = true;
-    for (int k = 0; k < kRsParity; ++k) {
-        std::uint8_t acc = 0;
-        for (int i = 0; i < kRsN; ++i) acc = static_cast<std::uint8_t>(products[k][acc] ^ c[static_cast<std::size_t>(i)]);
-        s[static_cast<std::size_t>(k)] = acc;
-        if (acc != 0) clean = false;
-    }
-    if (clean) return 0;
     // Erasure locator: prod (1 - X_e x), X_e = beta^j, j = 254 - index.
     std::array<std::uint8_t, kRsParity + 1> lambda{}, prev{}, tmp{};
     lambda[0] = 1;
@@ -666,12 +675,21 @@ int rsCorrectCodewordErasures(std::array<std::uint8_t, kRsN>& c, const std::vect
     if (l == 0 || l > kRsParity || (l - f) * 2 + f + spare > kRsParity) return -1;
     std::array<int, kRsParity> powers{};
     int found = 0;
+    // Chien search, lambda(beta^-j) for every position j, in the log domain: the term lambda_i * x^i
+    // is exp[log lambda_i + i * log x], and i * log x is kept as a running sum modulo 255. One
+    // table read per term instead of two multiplications; the values are the same.
+    std::array<int, kRsParity + 1> logLambda{};
+    for (int i = 0; i <= l; ++i)
+        logLambda[static_cast<std::size_t>(i)] = lambda[static_cast<std::size_t>(i)] ? g.log[lambda[static_cast<std::size_t>(i)]] : -1;
     for (int j = 0; j < kRsN; ++j) {
-        const std::uint8_t xinv = betaPow(g, -j);
-        std::uint8_t v = 0, xp = 1;
+        const int logX = (((255 - j) % 255) * kRsGap) % 255;   // log of beta^-j
+        std::uint8_t v = 0;
+        int power = 0;
         for (int i = 0; i <= l; ++i) {
-            v ^= g.mul(lambda[static_cast<std::size_t>(i)], xp);
-            xp = g.mul(xp, xinv);
+            const int ll = logLambda[static_cast<std::size_t>(i)];
+            if (ll >= 0) v ^= g.exp[static_cast<std::size_t>(ll + power)];
+            power += logX;
+            if (power >= 255) power -= 255;
         }
         if (v == 0) {
             if (found == kRsParity) return -1;
@@ -706,6 +724,13 @@ int rsCorrectCodewordErasures(std::array<std::uint8_t, kRsN>& c, const std::vect
         c[static_cast<std::size_t>(kRsN - 1 - j)] ^= g.mul(g.mul(num, gfInv(g, den)), scale);
     }
     return found;
+}
+
+int rsCorrectCodewordErasures(std::array<std::uint8_t, kRsN>& c, const std::vector<int>& eras, int spare = 8) {
+    if (static_cast<int>(eras.size()) > kRsParity) return -1;
+    std::array<std::uint8_t, kRsParity> s{};
+    if (rsSyndromes(c, s)) return 0;
+    return rsCorrectWithSyndromes(c, s, eras, spare);
 }
 
 }  // namespace
@@ -883,23 +908,123 @@ int LritDecoder::asmErrorsAt(std::size_t bitOffset, bool* inverted) const {
     return std::min(normal, complemented);
 }
 
-void LritDecoder::assembleAt(std::size_t bitOffset, bool inverted, int asmErrors, Cadu* out) {
-    Cadu cadu;
-    cadu.syncFound = true;
-    cadu.asmBitErrors = asmErrors;
-    cadu.syncOffsetBits = static_cast<int>(bitOffset);
-    cadu.bytes.resize(kCaduBytes);
+// Worker threads for the frame rescue, shared by every decoder in the process and started on first
+// use. One batch runs at a time; the calling thread takes jobs alongside the workers.
+class RescuePool {
+public:
+    static RescuePool& instance() {
+        static RescuePool pool;
+        return pool;
+    }
+    // Calls fn(0) .. fn(n-1), on at most `threads` threads including the caller's; returns when all
+    // have finished. fn must not throw.
+    void run(int n, int threads, const std::function<void(int)>& fn) {
+        if (n <= 0) return;
+        threads = std::min(threads, n);
+        if (threads <= 1) {
+            for (int i = 0; i < n; ++i) fn(i);
+            return;
+        }
+        std::lock_guard<std::mutex> batch(batchMutex_);
+        {
+            std::lock_guard<std::mutex> lock(m_);
+            while (static_cast<int>(workers_.size()) < threads - 1) workers_.emplace_back([this] { work(); });
+            fn_ = &fn;
+            n_ = n;
+            next_ = 0;
+            pending_ = n;
+            helpers_ = threads - 1;
+            ++generation_;
+        }
+        wake_.notify_all();
+        takeJobs();
+        std::unique_lock<std::mutex> lock(m_);
+        done_.wait(lock, [this] { return pending_ == 0 && active_ == 0; });
+        fn_ = nullptr;
+        helpers_ = 0;
+    }
+    ~RescuePool() {
+        {
+            std::lock_guard<std::mutex> lock(m_);
+            quit_ = true;
+        }
+        wake_.notify_all();
+        for (std::thread& t : workers_) if (t.joinable()) t.join();
+    }
+
+private:
+    void takeJobs() {
+        for (;;) {
+            int i;
+            {
+                std::lock_guard<std::mutex> lock(m_);
+                if (next_ >= n_) return;
+                i = next_++;
+            }
+            (*fn_)(i);
+            {
+                std::lock_guard<std::mutex> lock(m_);
+                --pending_;
+            }
+            done_.notify_all();
+        }
+    }
+    void work() {
+        std::uint64_t seen = 0;
+        for (;;) {
+            {
+                std::unique_lock<std::mutex> lock(m_);
+                wake_.wait(lock, [&] { return quit_ || (generation_ != seen && fn_ != nullptr && helpers_ > 0); });
+                if (quit_) return;
+                seen = generation_;
+                --helpers_;
+                ++active_;
+            }
+            takeJobs();
+            {
+                std::lock_guard<std::mutex> lock(m_);
+                --active_;
+            }
+            done_.notify_all();
+        }
+    }
+    std::mutex batchMutex_, m_;
+    std::condition_variable wake_, done_;
+    std::vector<std::thread> workers_;
+    const std::function<void(int)>* fn_ = nullptr;
+    int n_ = 0, next_ = 0, pending_ = 0, helpers_ = 0, active_ = 0;
+    std::uint64_t generation_ = 0;
+    bool quit_ = false;
+};
+
+int LritDecoder::defaultRescueThreads() {
+    // Two cores are left for the demodulator and the interface.
+    const unsigned cores = std::thread::hardware_concurrency();
+    return static_cast<int>(std::clamp<unsigned>(cores > 2 ? cores - 2 : 1, 1, 8));
+}
+
+// The part of a frame's decoding that depends only on the buffers: the bytes at this position,
+// derandomised, and Reed-Solomon. No decoder state is read or written, so it can run on any thread
+// while the buffers are not being changed.
+LritDecoder::FrameBody LritDecoder::hardDecode(std::size_t bitOffset, bool inverted, int asmErrors) const {
+    FrameBody f;
+    f.valid = true;
+    f.bitOffset = bitOffset;
+    f.inverted = inverted;
+    f.asmErrors = asmErrors;
+    std::vector<std::uint8_t>& plain = f.plain;
+    plain.resize(kCaduBytes);
     for (std::size_t b = 0; b < static_cast<std::size_t>(kCaduBytes); ++b) {
         std::uint8_t byte = 0;
         for (int i = 0; i < 8; ++i)
             byte = static_cast<std::uint8_t>(
                 (byte << 1) | bitBuffer_[bitOffset + b * 8 + static_cast<std::size_t>(i)]);
         if (inverted) byte = static_cast<std::uint8_t>(~byte);
-        cadu.bytes[b] = byte;
+        plain[b] = byte;
     }
     // The marker bytes are rewritten to the marker itself: a frame accepted with marker bit
     // errors would otherwise carry them on to anything that re-checks bytes 0..3.
-    cadu.bytes[0] = 0x1A; cadu.bytes[1] = 0xCF; cadu.bytes[2] = 0xFC; cadu.bytes[3] = 0x1D;
+    plain[0] = 0x1A; plain[1] = 0xCF; plain[2] = 0xFC; plain[3] = 0x1D;
     // One derandomisation, over the range the link randomises, and every later reader uses the
     // result. Doing it separately for the check and for the packet layer is how the two ended up
     // describing different byte sequences.
@@ -921,25 +1046,138 @@ void LritDecoder::assembleAt(std::size_t bitOffset, bool inverted, int asmErrors
     // frame's (VCID | 0x3F, VCID 63) comes out with six low bits of 0xC0 = 0: filler and data
     // swapped places exactly, which silently discarded every data frame and sent every filler
     // frame on to the packet reassembler.
-    std::vector<std::uint8_t> plain = cadu.bytes;
     const auto& seq = LritDecoder::randomiserBits();
     for (std::size_t i = 4; i < plain.size(); ++i)
         plain[i] = static_cast<std::uint8_t>(plain[i] ^ seq[(i - 4) % seq.size()]);
 
     // Reed-Solomon correction before anything is read out of the frame, so the header fields come
     // from the corrected bytes. rsCorrect leaves a frame it cannot correct untouched, and that frame
-    // then fails the check below exactly as before.
-    int rsFixed = rsCorrect(plain, kRsInterleaveDepth);
+    // then fails the check in assembleAt exactly as before.
+    f.rsFixed = rsCorrect(plain, kRsInterleaveDepth);
+    return f;
+}
+
+void LritDecoder::rescueInto(FrameBody& f, std::chrono::steady_clock::time_point deadline) const {
+    f.rescueAttempted = true;
+    std::vector<uint8_t> better = f.plain;
+    if (rescueFrame(f.bitOffset, f.inverted, f.asmErrors, better, deadline)) {
+        f.rescued = true;
+        f.better = std::move(better);
+    }
+}
+
+// The frames now in the buffer, decoded ahead of the frame synchroniser and in parallel.
+//
+// The rescue of one frame costs many times a plain decode, and at the SNR it exists for most
+// frames need it, so run in line it is slower than the stream arrives. Frames are independent of
+// one another, and while the synchroniser is locked it is known where the next ones start. So each
+// batch is decoded here first, one frame per worker, and the synchroniser then walks the same
+// frames in order exactly as before and finds their results ready (assembleAt). A frame it asks
+// for that is not here -- lock just acquired, a polarity change -- is decoded in line as before.
+// Nothing about which frames are accepted changes; only where the work is done.
+void LritDecoder::precomputeFrames() {
+    frameCache_.clear();
+    if (!rescueEnabled_ || !locked_ || rescueThreads_ < 2) return;
+    using Clock = std::chrono::steady_clock;
+    const std::size_t needBits = static_cast<std::size_t>(kCaduBytes) * 8;
+    if (bitBuffer_.size() < consumed_ + 2 * needBits) return;   // one frame: nothing to share out
+    const std::size_t n = std::min<std::size_t>((bitBuffer_.size() - consumed_) / needBits, 64);
+    // The position and polarity the locked synchroniser will ask for, frame by frame.
+    frameCache_.resize(n);
+    bool lockInverted = lockInverted_;
+    for (std::size_t k = 0; k < n; ++k) {
+        const std::size_t at = consumed_ + k * needBits;
+        bool inverted = lockInverted;
+        const int errors = asmErrorsAt(at, &inverted);
+        const bool flip = inverted != lockInverted;
+        FrameBody& f = frameCache_[k];
+        f.bitOffset = at;
+        if (errors <= (flip ? kFlipMaxErrors : kLockMaxErrors)) {
+            lockInverted = inverted;
+            f.inverted = inverted;
+            f.asmErrors = errors;
+        } else {
+            f.inverted = lockInverted;
+            f.asmErrors = inverted == lockInverted ? errors : kSyncBits - errors;
+        }
+    }
+    const bool limited = rescueRatio_ > 0.0;
+    const auto tStart = Clock::now();
+    const bool budget = !limited ||
+        rescueSpent_ <= rescueRatio_ * std::chrono::duration<double>(tStart - rescueStart_).count() + 0.3;
+    // Frames the back-off after a run of failures would pass over are not worth starting.
+    const std::size_t skip = static_cast<std::size_t>(std::max(0, rescueSkip_));
+    const auto perFrame = std::chrono::milliseconds(limited ? 200 : 1000);
+    RescuePool::instance().run(static_cast<int>(n), rescueThreads_, [&](int k) {
+        const std::size_t at = frameCache_[static_cast<std::size_t>(k)].bitOffset;
+        const bool inverted = frameCache_[static_cast<std::size_t>(k)].inverted;
+        const int asmErrors = frameCache_[static_cast<std::size_t>(k)].asmErrors;
+        try {
+            FrameBody f = hardDecode(at, inverted, asmErrors);
+            if (f.rsFixed < 0 && budget && static_cast<std::size_t>(k) >= skip) rescueInto(f, Clock::now() + perFrame);
+            frameCache_[static_cast<std::size_t>(k)] = std::move(f);
+        } catch (...) {
+            frameCache_[static_cast<std::size_t>(k)].valid = false;   // out of memory: the synchroniser decodes it in line
+        }
+    });
+    if (limited) {
+        bool any = false;
+        for (const FrameBody& f : frameCache_) any = any || f.rescueAttempted;
+        if (any) rescueSpent_ += std::chrono::duration<double>(Clock::now() - tStart).count();
+    }
+}
+
+void LritDecoder::assembleAt(std::size_t bitOffset, bool inverted, int asmErrors, Cadu* out) {
+    Cadu cadu;
+    cadu.syncFound = true;
+    cadu.asmBitErrors = asmErrors;
+    cadu.syncOffsetBits = static_cast<int>(bitOffset);
+    FrameBody body;
+    bool ahead = false;   // decoded by precomputeFrames
+    for (FrameBody& f : frameCache_) {
+        if (f.valid && f.bitOffset == bitOffset && f.inverted == inverted && f.asmErrors == asmErrors) {
+            body = std::move(f);
+            f.valid = false;
+            ahead = true;
+            break;
+        }
+    }
+    if (!ahead) body = hardDecode(bitOffset, inverted, asmErrors);
+    std::vector<std::uint8_t> plain = std::move(body.plain);
+    int rsFixed = body.rsFixed;
     if (rsFixed < 0 && rescueEnabled_) {
         ++stats_.rescueTried;
-        std::vector<uint8_t> better = plain;
         using Clock = std::chrono::steady_clock;
         const auto tStart = Clock::now();
         const bool limited = rescueRatio_ > 0.0;
-        const bool allowed = !limited || rescueSpent_ <= rescueRatio_ * std::chrono::duration<double>(tStart - rescueStart_).count() + 0.3;
-        rescueDeadline_ = limited ? tStart + std::chrono::milliseconds(200) : Clock::time_point::max();
-        const bool rescued = allowed && rescueFrame(bitOffset, inverted, asmErrors, better);
-        if (limited) rescueSpent_ += std::chrono::duration<double>(Clock::now() - tStart).count();
+        // Frames inside a signal dropout cannot be rescued and each attempt costs the full search, so after a run of
+        // failures the next frames are not tried (the pause doubles up to 64 frames and ends at the first success).
+        bool allowed = rescueSkip_ == 0;
+        if (rescueSkip_ > 0) --rescueSkip_;
+        bool rescued = false;
+        std::vector<uint8_t> better;
+        if (allowed && ahead && body.rescueAttempted) {
+            rescued = body.rescued;   // done ahead, its time already counted for the batch
+            better = std::move(body.better);
+        } else if (allowed && ahead && limited) {
+            allowed = false;          // the batch had no time budget left for it
+        } else if (allowed) {
+            if (limited)
+                allowed = rescueSpent_ <= rescueRatio_ * std::chrono::duration<double>(tStart - rescueStart_).count() + 0.3;
+            if (allowed) {
+                // Longest a single frame may take: 200 ms live, 1 s offline.
+                better = plain;
+                rescued = rescueFrame(bitOffset, inverted, asmErrors, better, tStart + std::chrono::milliseconds(limited ? 200 : 1000));
+                if (limited) rescueSpent_ += std::chrono::duration<double>(Clock::now() - tStart).count();
+            }
+        }
+        if (allowed) {
+            if (rescued) { rescueFailStreak_ = 0; rescueBackoff_ = 0; }
+            else if (++rescueFailStreak_ >= 6) {
+                rescueBackoff_ = rescueBackoff_ == 0 ? 4 : std::min(64, rescueBackoff_ * 2);
+                rescueSkip_ = rescueBackoff_;
+            }
+        }
         if (rescued) {
             int diff = 0;
             for (std::size_t i = 4; i < better.size(); ++i) diff += better[i] != plain[i];
@@ -988,7 +1226,8 @@ void LritDecoder::assembleAt(std::size_t bitOffset, bool inverted, int asmErrors
 // has almost nothing left to guess in the fourth, and with one known it still sheds most of its
 // errors, so a frame a single pass loses by a few bytes per codeword comes back after one or two
 // rounds. The known marker bits at both ends of the frame are used the same way.
-bool LritDecoder::rescueFrame(std::size_t bitOffset, bool inverted, int asmErrors, std::vector<uint8_t>& plain) {
+bool LritDecoder::rescueFrame(std::size_t bitOffset, bool inverted, int asmErrors, std::vector<uint8_t>& plain,
+                              std::chrono::steady_clock::time_point deadline) const {
     constexpr std::size_t kFrameBits = static_cast<std::size_t>(kCaduBytes) * 8;
     constexpr int kMaxRounds = 6;
     if (softBuf_.size() < 2 * (bitOffset + kFrameBits)) return false;
@@ -1051,12 +1290,18 @@ bool LritDecoder::rescueFrame(std::size_t bitOffset, bool inverted, int asmError
         constexpr float dthTight = 0.0075f;  // candidates using nearly all 32 parity symbols: nothing but the soft distance checks them
         constexpr int fstep = 2, maxIter = 10, autoAccept = 18;
         constexpr int maxReach = 32;   // 2*errors + erasures the code can still resolve
-        constexpr int kRandomTrials = 600, kRankWindow = 24;   // candidates with 2*errors + erasures <= 18 need no soft check
+        const int kRandomTrials = randomTrials_; constexpr int kRankWindow = 24;   // candidates with 2*errors + erasures <= 18 need no soft check
         std::vector<float> post;
         float curGain = gain; int stall = 0;
-        for (int iter = 0; iter < maxIter && !allHave() && std::chrono::steady_clock::now() < rescueDeadline_; ++iter) {
+        for (int iter = 0; iter < maxIter && !allHave() && std::chrono::steady_clock::now() < deadline; ++iter) {
             BcjrK7::run(soft.data(), pairs, prior.data(), curGain, kG1, kG2, post);
             int newly = 0;
+            // Two passes over the unsolved codewords. The first is the plain sweep; a codeword it solves
+            // goes back into the next BCJR run as known bits, which does more for the others than any
+            // search here. Only when it solves nothing is the wider (and far costlier) search run.
+            for (int phase = 0; phase < 2 && newly == 0; ++phase) {
+            const bool deep = phase == 1;
+            if (deep && stall != 0) break;   // once per frame, on the nominal gain: repeating it on the other gains costs 25% more time for 0.4 points
             for (int pos = 0; pos < kRsInterleaveDepth; ++pos) {
                 if (have[static_cast<std::size_t>(pos)]) continue;
                 std::array<std::uint8_t, kRsN> raw{};
@@ -1078,17 +1323,22 @@ bool LritDecoder::rescueFrame(std::size_t bitOffset, bool inverted, int asmError
                 for (int ii = 0; ii < kRsN; ++ii) order[static_cast<std::size_t>(ii)] = ii;
                 std::sort(order.begin(), order.end(), [&](int a, int b) { return rel[static_cast<std::size_t>(a)] < rel[static_cast<std::size_t>(b)]; });
                 float bestScore = -1e30f; bool got = false; std::array<std::uint8_t, kRsN> bestCode{};
+                // Every erasure set below is tried on this one word, so its syndromes are taken once.
+                std::array<std::uint8_t, kRsParity> rawSyndromes{};
+                const bool rawClean = rsSyndromes(raw, rawSyndromes);
                 // One erasure set: decode, check, and score the result against the posteriors.
+                float dScale = 1.0f;
                 auto tryErasures = [&](const std::vector<int>& er) {
                     const int F = static_cast<int>(er.size());
                     auto code = raw;
-                    const int rcx = (F == 0 ? rsCorrectCodeword(code) : rsCorrectCodewordErasures(code, er, 0));
+                    const int rcx = F == 0 ? rsCorrectCodeword(code)
+                                           : (rawClean ? 0 : rsCorrectWithSyndromes(code, rawSyndromes, er, 0));
                     if (rcx < 0) return;
                     int ne = 0;
                     { std::array<bool, kRsN> isE{}; for (int e : er) isE[static_cast<std::size_t>(e)] = true;
                       for (int ii = 0; ii < kRsN; ++ii) if (!isE[static_cast<std::size_t>(ii)] && code[static_cast<std::size_t>(ii)] != raw[static_cast<std::size_t>(ii)]) ++ne; }
                     if (2 * ne + F > maxReach) return;
-                    auto chk = code; if (rsCorrectCodeword(chk) != 0) return;
+                    { std::array<std::uint8_t, kRsParity> check{}; if (!rsSyndromes(code, check)) return; }   // must be a codeword
                     float sc = 0.0f;
                     for (int ii = 0; ii < kRsN; ++ii) {
                         const std::size_t byteIdx = 4 + static_cast<std::size_t>(ii) * kRsInterleaveDepth + static_cast<std::size_t>(pos);
@@ -1096,19 +1346,36 @@ bool LritDecoder::rescueFrame(std::size_t bitOffset, bool inverted, int asmError
                         for (int i = 0; i < 8; ++i) { const float l = post[byteIdx * 8 + static_cast<std::size_t>(i)]; sc += ((v >> (7 - i)) & 1) ? l : -l; }
                     }
                     const float d = (tot - sc) / (2.0f * tot);
-                    if (!(2 * ne + F <= autoAccept || d < (2 * ne + F > 28 ? dthTight : dth))) return;
+                    if (!(2 * ne + F <= autoAccept || d < dScale * (2 * ne + F > 28 ? dthTight : dth))) return;
                     if (sc > bestScore) { bestScore = sc; bestCode = code; got = true; }
                 };
-                for (int F = 0; F <= 32; F += fstep) tryErasures(std::vector<int>(order.begin(), order.begin() + F));
+                if (!deep) for (int F = 0; F <= 32; F += fstep) tryErasures(std::vector<int>(order.begin(), order.begin() + F));
+                // Deterministic neighbourhood of the plain sweep: erase the F-2 least reliable bytes plus two more
+                // from the next few ranks. The true errors are mostly, not always, the least reliable bytes, and
+                // this covers the commonest misses (one or two errors ranked just outside the erased set) with a
+                // fixed number of decodes, only for codewords the sweep failed. More candidates mean more
+                // chances of a false one, so these are believed only when closer to the channel (dScale).
+                if (!got && deep) {
+                    constexpr int pairWindow = 8;
+                    dScale = 0.8f;
+                    for (int F = 22; F <= 32 && !got; F += 2)
+                        for (int a = F - 2; a < std::min(kRsN, F - 2 + pairWindow) && !got; ++a)
+                            for (int b = a + 1; b < std::min(kRsN, F - 2 + pairWindow) && !got; ++b) {
+                                std::vector<int> er(order.begin(), order.begin() + (F - 2));
+                                er.push_back(order[static_cast<std::size_t>(a)]);
+                                er.push_back(order[static_cast<std::size_t>(b)]);
+                                tryErasures(er);
+                            }
+                }
                 // Randomised erasure sets: the true errors are mostly, not always, among the least reliable bytes.
                 // Erase the least reliable F-s bytes and s more drawn from the next ranks; with a few hundred
                 // draws one of them covers enough of the real errors to land inside the code's reach.
-                if (!got) {
+                if (!got && deep) {
                     std::uint32_t rng = 0x9E3779B9u ^ static_cast<std::uint32_t>(pos * 2654435761u) ^ static_cast<std::uint32_t>(iter * 40503u);
                     auto next = [&rng] { rng = rng * 1664525u + 1013904223u; return rng >> 8; };
                     std::vector<int> pool;
                     for (int t = 0; t < kRandomTrials && !got; ++t) {
-                        if ((t & 15) == 15 && std::chrono::steady_clock::now() >= rescueDeadline_) break;
+                        if ((t & 15) == 15 && std::chrono::steady_clock::now() >= deadline) break;
                         const int F = 20 + 2 * static_cast<int>(next() % 7);
                         const int sw = std::min(F, 2 + static_cast<int>(next() % 8));
                         const int W = std::min(kRsN, F + kRankWindow);
@@ -1123,6 +1390,7 @@ bool LritDecoder::rescueFrame(std::size_t bitOffset, bool inverted, int asmError
                     }
                 }
                 if (got) { adopt(pos, bestCode); ++newly; }
+            }
             }
             if (newly == 0) { if (stall < 2) { curGain = gain * (stall == 0 ? 0.6f : 1.6f); ++stall; continue; } break; }
         }
@@ -1237,6 +1505,7 @@ void LritDecoder::acceptCadu(Cadu&& cadu) {
 
 void LritDecoder::processPending() {
     const std::size_t needBits = static_cast<std::size_t>(kCaduBytes) * 8;
+    precomputeFrames();
     while (true) {
         if (locked_) {
             if (bitBuffer_.size() < consumed_ + needBits) break;
@@ -1313,6 +1582,7 @@ void LritDecoder::processPending() {
         ++consumed_;
         ++stats_.cadusAssembled;
     }
+    frameCache_.clear();   // its bit offsets are about to move
     if (stats_.cadusAssembled > 0)
         stats_.frameSyncRate = static_cast<double>(stats_.cadusWithSync)
                                / static_cast<double>(stats_.cadusAssembled);

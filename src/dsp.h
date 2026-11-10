@@ -177,9 +177,28 @@ public:
     float carrierOffsetHz() const { return static_cast<float>(freq_ * rate_ / 6.283185307179586); }
     // Mean of cos(4 * phase error): about 1 when locked, about 0 when not.
     float lockMeasure() const { return static_cast<float>(lock_); }
+    // Diagnostics: RMS of the carrier and timing error detector outputs over the last block. Both
+    // are roughly the phase error in radians and the timing error in samples while locked, so these
+    // are the loop jitter that shows up as an SNR loss.
+    float carrierErrorRms() const { return cErrRms_; }
+    float timingErrorRms() const { return tErrRms_; }
     int acquisitions() const { return acquisitions_; }
     // Es/N0 (dB) the sample-rate-limited receive filter is designed for; call before configure().
     void setMmseDesignSnrDb(double db) { mmseDesignSnrDb_ = db; }
+    // Matched-filter half span in symbols (default 4, Hann-tapered; negative = plain truncation).
+    void setMatchedFilterSymbols(float s) { mfSymbols_ = s; }
+    // Diagnostics only: hold the symbol clock at the nominal period instead of tracking it. Used to
+    // tell a timing-loop loss apart from a matched-filter loss.
+    void setTimingFreeze(bool on) { freezeTiming_ = on; }
+    // Diagnostics only: shift the first sampling instant by this many samples (fractional allowed),
+    // so a frozen clock can be aimed at the true one.
+    void setTimingOffset(double samples) { timingOffset_ = samples; }
+    // Loop damping. 0.707 is the usual compromise; a wider loop with a higher damping factor can
+    // hold a narrower bandwidth without the overshoot that loses lock on a drifting clock.
+    void setLoopDamping(double z) { zeta_ = z; }
+    // Force the low-rate branch (Mueller & Muller timing detector, MMSE receive filter) even at two
+    // samples per symbol, to compare the two detectors on the same signal.
+    void setForceLowRate(bool on) { forceMm_ = on; }
 
 private:
     void acquire();
@@ -195,6 +214,13 @@ private:
     bool lowRate_ = false;
     double mmseDesignSnrDb_ = 0.0;                // design Es/N0 of the low-rate receive filter
     double clampFrac_ = 0.005;                    // period limit, fraction of the nominal period
+    bool freezeTiming_ = false;                   // diagnostics: do not track the symbol clock
+    double timingOffset_ = 0.0;                   // diagnostics: initial sampling instant, samples
+    double zeta_ = 0.70710678;                     // loop damping factor
+    bool forceMm_ = false;                         // diagnostics: use the low-rate timing detector
+    double cErrRms_ = 0.0, tErrRms_ = 0.0;        // diagnostics: detector jitter
+    double cErrAcc_ = 0.0, tErrAcc_ = 0.0; long cErrN_ = 0, tErrN_ = 0;
+    float mfSymbols_ = -6.0f;                      // matched-filter half span, symbols (negative: no taper)
     std::complex<float> dc_{0.0f, 0.0f};
     float inRate_ = 6e6f, rate_ = 6e6f, symbolRate_ = 3e6f, alpha_ = 0.5f;
     float cBw_ = 0.004f, tBw_ = 0.0008f;

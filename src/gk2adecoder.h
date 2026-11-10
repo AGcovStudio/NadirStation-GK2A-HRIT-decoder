@@ -234,6 +234,13 @@ public:
     // Share of wall-clock time the soft-decision rescue may use (default 0.5, so a live receiver on
     // its own thread keeps up with the stream); 0 or less removes the limit, for offline decoding.
     void setRescueBudget(double ratio) { rescueRatio_ = ratio; }
+    // Extra randomised erasure sets tried per codeword after the deterministic sweep (0 = off, the default).
+    // Each costs a full erasure decode; 600 to 2400 buys about one percentage point at 1.2 dB, offline only.
+    void setRandomTrials(int n) { randomTrials_ = n; }
+    // Threads the rescue may use at once, the decoding thread included (1 = no parallel rescue).
+    // Default: the machine's cores less two, at most 8.
+    void setRescueThreads(int n) { rescueThreads_ = n < 1 ? 1 : n; }
+    static int defaultRescueThreads();
     // Frames in a row without marker or Reed-Solomon pass before the lock is given up (default 1).
     void setMissLimit(int frames) { missLimit_ = frames < 1 ? 1 : frames; }
     // Start a new symbol stream (new I/Q hypothesis) without clearing the statistics.
@@ -259,7 +266,25 @@ private:
     // Iterative re-decode of a frame Reed-Solomon could not correct: codewords that do correct are
     // fed back into the Viterbi decoder as known bits (the four codewords are byte-interleaved, so
     // knowing one in four bytes pins the trellis for the rest), and the others are tried again.
-    bool rescueFrame(std::size_t bitOffset, bool inverted, int asmErrors, std::vector<uint8_t>& plain);
+    // Reads the buffers only (no decoder state), so several frames can be rescued at once.
+    bool rescueFrame(std::size_t bitOffset, bool inverted, int asmErrors, std::vector<uint8_t>& plain,
+                     std::chrono::steady_clock::time_point deadline) const;
+    // One frame's bytes after derandomising and Reed-Solomon, and the rescue's result if it was run.
+    struct FrameBody {
+        bool valid = false;
+        std::size_t bitOffset = 0;
+        bool inverted = false;
+        int asmErrors = 0;
+        std::vector<uint8_t> plain;    // derandomised, Reed-Solomon applied when it could correct
+        int rsFixed = -1;              // bytes Reed-Solomon corrected, negative when it could not
+        bool rescueAttempted = false, rescued = false;
+        std::vector<uint8_t> better;   // the rescued frame
+    };
+    FrameBody hardDecode(std::size_t bitOffset, bool inverted, int asmErrors) const;
+    void rescueInto(FrameBody& frame, std::chrono::steady_clock::time_point deadline) const;
+    void precomputeFrames();
+    std::vector<FrameBody> frameCache_;   // filled and emptied inside one processPending()
+    int rescueThreads_ = defaultRescueThreads();
 
     // Frame synchroniser. The 32-bit marker is searched for with up to kSearchMaxErrors bit errors
     // (a marker with errors is still a marker: at the SNR where Reed-Solomon just copes, one or
@@ -297,9 +322,10 @@ private:
     std::vector<std::int8_t> softBuf_;   // two quantised soft symbols per pair, pair k aligned with bitBuffer_[k] (may run ahead by the Viterbi delay)
     bool rescueEnabled_ = true;
     double rescueRatio_ = 0.5;
+    int randomTrials_ = 0;
+    int rescueFailStreak_ = 0, rescueBackoff_ = 0, rescueSkip_ = 0;
     double rescueSpent_ = 0.0;                                   // seconds spent in rescueFrame
     std::chrono::steady_clock::time_point rescueStart_ = std::chrono::steady_clock::now();
-    std::chrono::steady_clock::time_point rescueDeadline_ = std::chrono::steady_clock::time_point::max();
     // One soft value held over from a feed that ended on an odd symbol
     // count, because the rate-1/2 code pairs symbols two at a time.
     float pendingSoft_ = 0.0f;   // a symbol held over from an odd-length feed
@@ -344,6 +370,8 @@ public:
     void setSoftScale(float s) { scale_ = s; }
     void setRescueEnabled(bool on) { dec_.setRescueEnabled(on); }
     void setRescueBudget(double ratio) { dec_.setRescueBudget(ratio); }
+    void setRandomTrials(int n) { dec_.setRandomTrials(n); }
+    void setRescueThreads(int n) { dec_.setRescueThreads(n); }
     void setMissLimit(int frames) { dec_.setMissLimit(frames); }
 
 private:
