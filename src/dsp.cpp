@@ -834,6 +834,17 @@ void PskDemod::track(std::complex<float> z, DPSKResult& out) {
 
 // ---- QpskDemod ---------------------------------------------------------------------------
 
+void DcBlocker::configure(float sampleRate, float cutoffHz) {
+    if (!(sampleRate > 0.0f) || !(cutoffHz > 0.0f)) {
+        alpha_ = 1.0f / 4096.0f;
+        reset();
+        return;
+    }
+    const float a = 1.0f - std::exp(-2.0f * static_cast<float>(kPi) * cutoffHz / sampleRate);
+    alpha_ = std::clamp(a, 1.0e-6f, 0.1f);
+    reset();
+}
+
 void QpskDemod::configure(float sampleRate, float symbolRate, float rrcAlpha, float carrierLoopBw,
                           float timingLoopBw) {
     if (sampleRate <= 0.0f || symbolRate <= 0.0f) return;
@@ -937,6 +948,7 @@ void QpskDemod::configure(float sampleRate, float symbolRate, float rrcAlpha, fl
     }
     loopGains(cBw_, cKp_, cKi_, zeta_);
     loopGains(tBw_, tKp_, tKi_, zeta_);
+    dcBlocker_.configure(rate_, dcCutoffHz_);
     reset();
     configured_ = true;
 }
@@ -956,7 +968,7 @@ void QpskDemod::reset() {
     prevSym_ = {0, 0};
     ampAvg_ = 0.0;
     acqBuf_.clear();
-    dc_ = {0.0f, 0.0f};
+    dcBlocker_.reset();
     acqLength_ = rate_ > 1.5e6f ? 65536 : 16384;
     acquiring_ = true;
     lock_ = 0.0;
@@ -1046,7 +1058,7 @@ DPSKResult QpskDemod::process(const std::vector<std::complex<float>>& iq) {
             z = acc;
         }
         if (!std::isfinite(z.real()) || !std::isfinite(z.imag())) z = {0.0f, 0.0f};
-        if (lowRate_) { dc_ += (z - dc_) * (1.0f / 4096.0f); z -= dc_; }
+        if (dcBlockEnabled_) z = dcBlocker_.process(z);
         power_ += 0.0005f * (std::norm(z) - power_);
         if (--agcCount_ <= 0) { agcScale_ = 1.0f / std::sqrt(std::max(power_, 1e-20f)); agcCount_ = 8; }
         z *= agcScale_;

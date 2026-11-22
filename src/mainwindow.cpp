@@ -45,8 +45,9 @@
 namespace {
 
 bool isSupportedRecording(const QString& path) {
-    const QString ext = QFileInfo(path).suffix().toLower();
-    return ext == QLatin1String("cs8") || ext == QLatin1String("cs16") || ext == QLatin1String("wav");
+    hritapp::IqFormat format;
+    // Looks at the header first (ZIQ_ / ZIQ2 / RIFF), then at the extension.
+    return hritapp::formatForPath(toFsPath(path), format);
 }
 
 QString humanSize(qint64 bytes) {
@@ -89,7 +90,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     outputEdit_->setText(settings.value(QStringLiteral("outputDir"), outputRoot()).toString());
     keyEdit_->setText(settings.value(QStringLiteral("keyFile")).toString());
     rateSpin_->setValue(settings.value(QStringLiteral("manualRateMsps"), 6.0).toDouble());
-    statusBar()->showMessage(QStringLiteral("就绪：把 .cs8 / .cs16 / .wav 录音拖进窗口，或点“浏览”选择。"));
+    dcBlock_->setChecked(settings.value(QStringLiteral("dcBlock"), true).toBool());
+    statusBar()->showMessage(QStringLiteral("就绪：把基带录音（cs8、cs16、cs32、cf32、cu8、wav、ziq、ziq2）拖进窗口，或点“浏览”选择。"));
 }
 
 MainWindow::~MainWindow() {
@@ -124,7 +126,7 @@ void MainWindow::buildUi() {
     auto* inputLayout = new QVBoxLayout(inputBox);
     auto* inputRow = new QHBoxLayout;
     inputEdit_ = new QLineEdit;
-    inputEdit_->setPlaceholderText(QStringLiteral("拖入 .cs8 / .cs16 / .wav，或点右侧“浏览”"));
+    inputEdit_->setPlaceholderText(QStringLiteral("拖入 cs8 / cs16 / cs32 / cf32 / cu8 / wav / ziq / ziq2，或点右侧“浏览”"));
     auto* browseIn = new QPushButton(QStringLiteral("浏览…"));
     inputRow->addWidget(inputEdit_, 1);
     inputRow->addWidget(browseIn);
@@ -144,10 +146,15 @@ void MainWindow::buildUi() {
     rateRow->addWidget(manualRate_);
     rateRow->addWidget(rateSpin_, 1);
     inputLayout->addLayout(rateRow);
-    auto* rateHint = new QLabel(QStringLiteral("cs8 / cs16 文件本身不带采样率：会先看同名 .txt 里的 rate、再看文件名里的“…SPS”，都没有时用这里的值。WAV 用文件头里的采样率。采样率须不低于 3.15 MS/s。"));
+    auto* rateHint = new QLabel(QStringLiteral("cs8 / cs16 / cs32 / cf32 / cu8 本身不带采样率：会先看同名 .txt 里的 rate、再看文件名里的“…SPS”（常见的“…SPS”命名也认），都没有时用这里的值。WAV / ZIQ / ZIQ2 用文件头里的采样率。采样率须不低于 3.15 MS/s。"));
     rateHint->setObjectName(QStringLiteral("Muted"));
     rateHint->setWordWrap(true);
     inputLayout->addWidget(rateHint);
+    dcBlock_ = new QCheckBox(QStringLiteral("去除直流偏置（推荐）"));
+    dcBlock_->setChecked(true);
+    dcBlock_->setToolTip(QStringLiteral("在解调前用 500 Hz 高通去掉 I/Q 的直流偏置：SDR 的中心尖峰、本振泄漏和 ADC 偏置都会让 AGC 和载波环偏离。\n"
+                                        "HRIT 信号从直流一直铺到约 2.25 MHz，500 Hz 的拐点对信号几乎没有影响。只有确认录音本身没有直流问题时才需要关掉。"));
+    inputLayout->addWidget(dcBlock_);
     leftLayout->addWidget(inputBox);
 
     auto* outBox = new QGroupBox(QStringLiteral("2  输出文件夹"));
@@ -305,7 +312,7 @@ void MainWindow::browseInput() {
     QSettings settings;
     const QString start = settings.value(QStringLiteral("inputDir"), QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).toString();
     const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("选择基带录音"), start,
-                                                      QStringLiteral("基带录音 (*.cs8 *.cs16 *.wav);;所有文件 (*)"));
+                                                      QStringLiteral("基带录音 (*.cs8 *.cs16 *.cs32 *.cf32 *.cu8 *.s8 *.s16 *.s32 *.f32 *.u8 *.wav *.w16 *.ziq *.ziq2);;所有文件 (*)"));
     if (path.isEmpty()) return;
     settings.setValue(QStringLiteral("inputDir"), QFileInfo(path).absolutePath());
     setInputPath(path);
@@ -355,14 +362,14 @@ void MainWindow::inspectInput() {
         return;
     }
     const hritapp::IqInfo info = reader.info();
-    const bool isWav = (info.format == hritapp::IqFormat::Wav);
-    manualRate_->setEnabled(!isWav);
-    if (isWav && manualRate_->isChecked()) {
+    const bool hasRate = hritapp::formatCarriesRate(info.format);
+    manualRate_->setEnabled(!hasRate);
+    if (hasRate && manualRate_->isChecked()) {
         QSignalBlocker block(manualRate_);
         manualRate_->setChecked(false);
         rateSpin_->setEnabled(false);
     }
-    const bool rateUnknown = (!isWav && info.rateSource == "手动设置" && !preferManual);
+    const bool rateUnknown = (!hasRate && info.rateSource == "手动设置" && !preferManual);
     if (rateUnknown && !manualRate_->isChecked()) {
         QSignalBlocker block(manualRate_);
         manualRate_->setChecked(true);
@@ -371,13 +378,18 @@ void MainWindow::inspectInput() {
         QSignalBlocker block(rateSpin_);
         rateSpin_->setValue(info.sampleRate / 1e6);   // show what was detected
     }
-    QString text = QStringLiteral("%1 · %2 MS/s（%3）· %4 秒 · %5")
-                       .arg(QString::fromUtf8(hritapp::formatName(info.format)))
+    const QString duration = info.framesExact
+                                 ? QStringLiteral("%1 秒").arg(static_cast<double>(info.frames) / info.sampleRate, 0, 'f', 1)
+                                 : QStringLiteral("时长未知");
+    QString text = QStringLiteral("%1 · %2 MS/s（%3）· %4 · %5")
+                       .arg(QString::fromUtf8(hritapp::describeFormat(info).c_str()))
                        .arg(info.sampleRate / 1e6, 0, 'f', 3)
                        .arg(QString::fromUtf8(info.rateSource.c_str()))
-                       .arg(static_cast<double>(info.frames) / info.sampleRate, 0, 'f', 1)
+                       .arg(duration)
                        .arg(humanSize(QFileInfo(path).size()));
     if (rateUnknown) text += QStringLiteral("\n文件没有标明采样率，暂用上面的值，请核对后再开始。");
+    if (!info.framesExact)
+        text += QStringLiteral("\n这个格式的采样总数要到读完才知道：进度按文件位置显示，补帧（按样本位置回头重解）不可用。");
     if (info.sampleRate < hritapp::HritPipeline::kMinSampleRate)
         text += QStringLiteral("\n采样率太低：GK-2A HRIT 至少需要 3.15 MS/s。");
     inputInfo_->setText(text);
@@ -397,7 +409,8 @@ void MainWindow::toggleRun() {
     }
     const QString path = inputEdit_->text().trimmed();
     if (path.isEmpty() || !QFileInfo(path).isFile() || !isSupportedRecording(path)) {
-        QMessageBox::information(this, QStringLiteral("还没有选好录音"), QStringLiteral("请先选择一个 .cs8、.cs16 或 .wav 录音文件。"));
+        QMessageBox::information(this, QStringLiteral("还没有选好录音"),
+                                 QStringLiteral("请先选择一个基带录音文件（cs8、cs16、cs32、cf32、cu8、wav、ziq 或 ziq2）。"));
         return;
     }
     inspectInput();
@@ -411,6 +424,7 @@ void MainWindow::toggleRun() {
     settings.setValue(QStringLiteral("outputDir"), outputEdit_->text());
     settings.setValue(QStringLiteral("keyFile"), keyEdit_->text());
     settings.setValue(QStringLiteral("manualRateMsps"), rateSpin_->value());
+    settings.setValue(QStringLiteral("dcBlock"), dcBlock_->isChecked());
 
     log_->clear();
     products_->clear();
@@ -421,7 +435,8 @@ void MainWindow::toggleRun() {
     progress_->setValue(0);
     onStats(hritapp::PipelineStats{});
     setRunning(true);
-    emit startRequested(path, rateSpin_->value() * 1e6, manualRate_->isChecked(), out, keyEdit_->text().trimmed());
+    emit startRequested(path, rateSpin_->value() * 1e6, manualRate_->isChecked(), out, keyEdit_->text().trimmed(),
+                        dcBlock_->isChecked());
 }
 
 void MainWindow::setRunning(bool running) {
@@ -433,6 +448,7 @@ void MainWindow::setRunning(bool running) {
     outputEdit_->setEnabled(!running);
     keyEdit_->setEnabled(!running);
     manualRate_->setEnabled(!running);
+    dcBlock_->setEnabled(!running);
     rateSpin_->setEnabled(!running && manualRate_->isChecked());
     statusBar()->showMessage(running ? QStringLiteral("解码中…") : QStringLiteral("就绪"));
 }
@@ -526,9 +542,9 @@ void MainWindow::showAbout() {
     QMessageBox::about(this, QStringLiteral("关于"),
         QStringLiteral("<h3>%1</h3>"
                        "<p>版本 %2<br>开发者：%3</p>"
-                       "<p>离线解码 GK-2A（千里眼-2A）HRIT 下行的基带录音：QPSK 解调 → Viterbi / Reed-Solomon → LRIT 文件 → 云图与 L2 产品。仅读取 .cs8 / .cs16 / .wav 文件，不控制任何无线电硬件，不联网。</p>"
+                       "<p>离线解码 GK-2A（千里眼-2A）HRIT 下行的基带录音：QPSK 解调 → Viterbi / Reed-Solomon → LRIT 文件 → 云图与 L2 产品。支持更多基带格式：cs8 / cs16 / cs32 / cf32 / cu8 / wav / ziq / ziq2（按文件头自动识别），不控制任何无线电硬件，不联网。</p>"
                        "<p>本软件是业余爱好者的学习研究项目，不是气象业务系统，也与韩国气象厅、国家气象卫星中心无任何隶属或授权关系。使用前请阅读“用户协议与免责声明”。</p>"
-                       "<p style='color:#8a919c'>第三方：Qt 6（LGPL v3）、OpenJPEG（BSD-2）、libjpeg-turbo（BSD/IJG/zlib）、Natural Earth（公有领域，国界为中国视角版本）。</p>")
+                       "<p style='color:#8a919c'>第三方：Qt 6（LGPL v3）、OpenJPEG（BSD-2）、libjpeg-turbo（BSD/IJG/zlib）、zstd（BSD-3，仅用于读取压缩 ZIQ）、Natural Earth（公有领域，国界为中国视角版本）。</p>")
             .arg(QString::fromUtf8(appinfo::kProductName), QString::fromUtf8(appinfo::kVersion), QString::fromUtf8(appinfo::kDeveloper)));
 }
 
@@ -546,5 +562,6 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     settings.setValue(QStringLiteral("outputDir"), outputEdit_->text());
     settings.setValue(QStringLiteral("keyFile"), keyEdit_->text());
     settings.setValue(QStringLiteral("manualRateMsps"), rateSpin_->value());
+    settings.setValue(QStringLiteral("dcBlock"), dcBlock_->isChecked());
     event->accept();
 }

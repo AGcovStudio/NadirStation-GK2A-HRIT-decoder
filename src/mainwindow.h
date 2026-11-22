@@ -25,7 +25,7 @@ public:
 
 signals:
     void startRequested(const QString& inputPath, double manualRateHz, bool preferManual, const QString& outputDir,
-                        const QString& keyPath);
+                        const QString& keyPath, bool dcBlock);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -60,6 +60,7 @@ private:
     QLineEdit* inputEdit_ = nullptr;
     QLabel* inputInfo_ = nullptr;
     QCheckBox* manualRate_ = nullptr;
+    QCheckBox* dcBlock_ = nullptr;
     QDoubleSpinBox* rateSpin_ = nullptr;
     QLineEdit* outputEdit_ = nullptr;
     QLineEdit* keyEdit_ = nullptr;

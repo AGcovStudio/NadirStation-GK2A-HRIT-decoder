@@ -12,7 +12,7 @@ constexpr float kCarrierLoopBw = 0.0003f;
 constexpr float kTimingLoopBw = 0.0002f;
 }  // namespace
 
-bool HritPipeline::configure(double sampleRate, std::string& error) {
+bool HritPipeline::configure(double sampleRate, std::string& error, bool dcBlock) {
     configured_ = false;
     if (!(sampleRate >= kMinSampleRate)) {
         error = "GK-2A HRIT 的符号率是 3 Msym/s，采样率至少要 3.15 MS/s（推荐 4.5 MS/s 以上，6 MS/s 最佳）。";
@@ -21,6 +21,7 @@ bool HritPipeline::configure(double sampleRate, std::string& error) {
     sampleRate_ = sampleRate;
     demod_.configure(static_cast<float>(sampleRate), static_cast<float>(kSymbolRate), kRrcAlpha, kCarrierLoopBw,
                      kTimingLoopBw);
+    demod_.setDcBlock(dcBlock);
     link_.setRescueBudget(0.0);   // offline file decoding: no wall-clock limit on the soft-decision rescue
     link_.setAsync(true);         // the link decoder gets its own thread, like in the live receiver
     configured_ = true;
@@ -61,8 +62,8 @@ const std::vector<std::complex<float>>& HritPipeline::process(
     carrierOffsetHz_ = result.carrierOffsetHz;
     symbols_ = std::move(result.symbols);
     link_.feed(symbols_, [this, &onFile](nadirstation::gk2a::Cadu&& frame) { handleFrame(std::move(frame), onFile); });
-    // SNR the way SatDump reports it: M2M4 moment estimator over every demodulated symbol, exponential
-    // averages with alpha = 0.001 (about 1000 symbols), kept across blocks.
+    // M2M4 moment estimator over every demodulated symbol, exponential averages with alpha = 0.001
+    // (about 1000 symbols), kept across blocks.
     constexpr double alpha = 0.001, beta = 1.0 - alpha;
     double y1 = snrY1_, y2 = snrY2_;
     for (const auto& z : symbols_) {

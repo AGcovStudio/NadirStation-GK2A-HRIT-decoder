@@ -44,7 +44,7 @@ std::string observationStamp(const std::string& fileName) {
 }  // namespace
 
 void DecodeWorker::run(const QString& inputPath, double manualRateHz, bool preferManual, const QString& outputDir,
-                       const QString& keyPath) {
+                       const QString& keyPath, bool dcBlock) {
     using clock = std::chrono::steady_clock;
     stop_.store(false);
 
@@ -55,16 +55,18 @@ void DecodeWorker::run(const QString& inputPath, double manualRateHz, bool prefe
         return;
     }
     const hritapp::IqInfo info = reader.info();
-    const double seconds = static_cast<double>(info.frames) / info.sampleRate;
-    emit inputInfo(QStringLiteral("%1 · %2 MS/s（%3）· %4 秒")
-                       .arg(QString::fromUtf8(hritapp::formatName(info.format)))
+    const bool durationKnown = info.framesExact && info.sampleRate > 0.0;
+    const double seconds = durationKnown ? static_cast<double>(info.frames) / info.sampleRate : 0.0;
+    emit inputInfo(QStringLiteral("%1 · %2 MS/s（%3）· %4")
+                       .arg(QString::fromUtf8(hritapp::describeFormat(info).c_str()))
                        .arg(info.sampleRate / 1e6, 0, 'f', 3)
                        .arg(QString::fromUtf8(info.rateSource.c_str()))
-                       .arg(seconds, 0, 'f', 1),
+                       .arg(durationKnown ? QStringLiteral("%1 秒").arg(seconds, 0, 'f', 1)
+                                          : QStringLiteral("时长未知（流式格式）")),
                    info.sampleRate);
 
     hritapp::HritPipeline pipe;
-    if (!pipe.configure(info.sampleRate, error)) {
+    if (!pipe.configure(info.sampleRate, error, dcBlock)) {
         emit finished(false, QString::fromUtf8(error.c_str()));
         return;
     }
@@ -80,7 +82,16 @@ void DecodeWorker::run(const QString& inputPath, double manualRateHz, bool prefe
                                     "请在左侧“密钥文件”里选择你自己的密钥文件。"));
     else
         emit logLine(QStringLiteral("使用密钥文件：%1").arg(key));   // the path only; key bytes are never logged
-    emit logLine(QStringLiteral("开始解码：%1 MS/s，约 %2 秒的数据。").arg(info.sampleRate / 1e6, 0, 'f', 3).arg(seconds, 0, 'f', 1));
+    emit logLine(durationKnown
+                     ? QStringLiteral("开始解码：%1 · %2 MS/s · 约 %3 秒的数据。")
+                           .arg(QString::fromUtf8(hritapp::describeFormat(info).c_str()))
+                           .arg(info.sampleRate / 1e6, 0, 'f', 3)
+                           .arg(seconds, 0, 'f', 1)
+                     : QStringLiteral("开始解码：%1 · %2 MS/s · 时长未知（压缩/流式格式）。")
+                           .arg(QString::fromUtf8(hritapp::describeFormat(info).c_str()))
+                           .arg(info.sampleRate / 1e6, 0, 'f', 3));
+    emit logLine(dcBlock ? QStringLiteral("直流抑制：开（500 Hz 高通，去除中心尖峰 / LO 泄漏）。")
+                         : QStringLiteral("直流抑制：关。"));
 
     int observations = 0;
     const auto publish = [&] {
@@ -131,7 +142,7 @@ void DecodeWorker::run(const QString& inputPath, double manualRateHz, bool prefe
         const auto now = clock::now();
         if (now - lastUi >= std::chrono::milliseconds(150)) {
             lastUi = now;
-            emit progress(static_cast<int>(1000.0 * static_cast<double>(reader.position()) / static_cast<double>(info.frames)));
+            emit progress(static_cast<int>(1000.0 * reader.progress()));
             emit statsChanged(pipe.stats());
             const std::size_t n = std::min<std::size_t>(symbols.size(), 2500);
             if (n > 0) emit constellation(std::vector<std::complex<float>>(symbols.end() - static_cast<std::ptrdiff_t>(n), symbols.end()));
@@ -149,7 +160,7 @@ void DecodeWorker::run(const QString& inputPath, double manualRateHz, bool prefe
     pipe.finish(onFile);
     const auto lastStats = pipe.stats();
     emit statsChanged(lastStats);
-    emit progress(stopped ? static_cast<int>(1000.0 * static_cast<double>(reader.position()) / static_cast<double>(info.frames)) : 1000);
+    emit progress(stopped ? static_cast<int>(1000.0 * reader.progress()) : 1000);
     // Repair pass: a frame that fails Reed-Solomon in one receiver setting very often passes in another. Go back
     // to the recording around each gap, decode it again with other settings, and rebuild the damaged segments.
     if (!stopped && !damaged.empty()) {
@@ -157,7 +168,7 @@ void DecodeWorker::run(const QString& inputPath, double manualRateHz, bool prefe
         auto frames = std::move(pipe.collectedFrames());
         const auto rep = hritapp::repairFrames(
             reader, frames, [this] { return stop_.load(); },
-            [this](const std::string& m) { emit logLine(QString::fromUtf8(m.c_str())); });
+            [this](const std::string& m) { emit logLine(QString::fromUtf8(m.c_str())); }, 240.0, dcBlock);
         if (rep.framesRecovered > 0) {
             int rebuilt = 0, skipped = 0;
             hritapp::HritPipeline::assembleFrames(frames, [&](nadirstation::gk2a::LritFile&& f) {

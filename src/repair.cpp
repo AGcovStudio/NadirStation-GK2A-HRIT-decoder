@@ -56,12 +56,13 @@ constexpr Variant kVariants[] = {
 
 // Decodes samples [start, end) of the recording with one setting and returns the checked frames.
 std::vector<std::vector<std::uint8_t>> decodeWindow(IqReader& reader, std::uint64_t start, std::uint64_t end,
-                                                    const Variant& v) {
+                                                    const Variant& v, bool dcBlock) {
     std::vector<std::vector<std::uint8_t>> out;
     if (!reader.seek(start)) return out;
     const double fs = reader.info().sampleRate;
     nadirstation::dsp::QpskDemod demod;
     demod.configure(static_cast<float>(fs), 3.0e6f, v.alpha, v.carrierBw, v.timingBw);
+    demod.setDcBlock(dcBlock);
     nadirstation::gk2a::QpskLinkDecoder link;
     link.setSoftScale(v.softScale);
     std::vector<std::complex<float>> block;
@@ -80,7 +81,7 @@ std::vector<std::vector<std::uint8_t>> decodeWindow(IqReader& reader, std::uint6
 
 RepairReport repairFrames(IqReader& reader, std::vector<std::vector<std::uint8_t>>& frames,
                           const std::function<bool()>& stopRequested,
-                          const std::function<void(const std::string&)>& log, double budgetSeconds) {
+                          const std::function<void(const std::string&)>& log, double budgetSeconds, bool dcBlock) {
     RepairReport rep;
     // ---- find the gaps -------------------------------------------------------------------------------------
     std::vector<Gap> gaps;
@@ -104,8 +105,11 @@ RepairReport repairFrames(IqReader& reader, std::vector<std::vector<std::uint8_t
         }
         last[k.vcid] = {i, k.counter};
     }
-    if (gaps.empty() || reader.info().frames == 0) return rep;
-    if (rep.framesMissing == 0) return rep;
+    if (gaps.empty() || rep.framesMissing == 0) return rep;
+    if (!reader.info().framesExact || reader.info().frames == 0) {
+        if (log) log("这个录音的采样总数未知（压缩 ZIQ / ZIQ2），无法按样本位置回头重解，跳过补帧。");
+        return rep;
+    }
     if (log) log("第一遍有 " + std::to_string(rep.framesMissing) + " 个帧没有解出来，正在换参数回头重解这些位置…");
 
     // Frames are evenly spaced in time, so the place of a gap in the recording follows from how far into
@@ -134,7 +138,7 @@ RepairReport repairFrames(IqReader& reader, std::vector<std::vector<std::uint8_t
             const std::uint64_t s1 = static_cast<std::uint64_t>(std::min(static_cast<double>(reader.info().frames), c + half));
             if (s1 <= s0) continue;
             ++rep.decodes;
-            const auto got = decodeWindow(reader, s0, s1, kVariants[vi]);
+            const auto got = decodeWindow(reader, s0, s1, kVariants[vi], dcBlock);
             // Where in the counter sequence did this window land?
             std::int64_t lo = INT64_MAX, hi = INT64_MIN;
             for (const auto& f : got) {

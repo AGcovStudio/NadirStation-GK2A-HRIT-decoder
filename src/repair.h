@@ -32,6 +32,6 @@ struct RepairReport {
 RepairReport repairFrames(IqReader& reader, std::vector<std::vector<std::uint8_t>>& frames,
                           const std::function<bool()>& stopRequested,
                           const std::function<void(const std::string&)>& log,
-                          double budgetSeconds = 240.0);
+                          double budgetSeconds = 240.0, bool dcBlock = true);
 
 }  // namespace hritapp
