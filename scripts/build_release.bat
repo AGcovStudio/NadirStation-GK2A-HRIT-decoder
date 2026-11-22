@@ -6,6 +6,8 @@ rem  Build NadirStation GK-2A HRIT Decoder, collect the runtime files, make the 
 rem  Run from anywhere:   scripts\build_release.bat
 rem  Needs: Qt 6 (MinGW 64-bit) + CMake + MinGW from the Qt installer, and Inno Setup 6 for the installer
 rem         (download: https://jrsoftware.org/isdl.php ).
+rem  Third-party sources (OpenJPEG, libjpeg-turbo, zstd) are fetched into third_party\ on the first run
+rem  if they are missing (scripts\fetch_third_party.ps1 needs internet for that step).
 rem  Edit the three paths below if your Qt is somewhere else.
 rem ===========================================================================================================
 set "QT_DIR=C:\Qt\6.11.2\mingw_64"
@@ -17,14 +19,23 @@ set "ROOT=%~dp0.."
 pushd "%ROOT%"
 set "ROOT=%CD%"
 set "APPEXE=NadirStation_GK2A-HRIT_decoder.exe"
-set "VERSION=1.0.5"
+set "VERSION=1.1.0"
 
-echo [1/4] Configure
+set "NEED_TP="
+if not exist "%ROOT%\third_party\openjpeg-2.5.3\CMakeLists.txt" set "NEED_TP=1"
+if not exist "%ROOT%\third_party\libjpeg-turbo-3.1.2\CMakeLists.txt" set "NEED_TP=1"
+if not exist "%ROOT%\third_party\zstd-1.5.7\build\cmake\CMakeLists.txt" set "NEED_TP=1"
+if defined NEED_TP (
+  echo [1/5] Fetch third-party sources
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\fetch_third_party.ps1" || goto :fail
+)
+
+echo [2/5] Configure
 cmake -S "%ROOT%" -B "%ROOT%\build" -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%QT_DIR%" || goto :fail
-echo [2/4] Build
+echo [3/5] Build
 cmake --build "%ROOT%\build" --parallel 4 || goto :fail
 
-echo [3/4] Collect runtime files into dist\
+echo [4/5] Collect runtime files into dist\
 if exist "%ROOT%\dist" rmdir /s /q "%ROOT%\dist"
 mkdir "%ROOT%\dist" || goto :fail
 copy /y "%ROOT%\build\%APPEXE%" "%ROOT%\dist\" >nul || goto :fail
@@ -42,7 +53,7 @@ if exist "%ROOT%\dist\dxcompiler.dll" del /q "%ROOT%\dist\dxcompiler.dll"
 if exist "%ROOT%\dist\dxil.dll" del /q "%ROOT%\dist\dxil.dll"
 rem The decryption key is NOT shipped: every user supplies their own EncryptionKeyMessage.bin.
 
-echo [4/4] Installer
+echo [5/5] Installer
 set "ISCC="
 for /f "usebackq delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\find_iscc.ps1"`) do set "ISCC=%%I"
 if "%ISCC%"=="" (

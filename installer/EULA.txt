@@ -1,4 +1,4 @@
-﻿NadirStation GK-2A HRIT 解码器 / NadirStation GK-2A HRIT Decoder
+NadirStation GK-2A HRIT 解码器 / NadirStation GK-2A HRIT Decoder
 用户协议与免责声明 / Terms of Use and Disclaimer
 版本 1.0.1 · 2026-11-02 · 开发者 / Developer: AGcov（BI2QYN）
 
@@ -14,7 +14,7 @@
 
 1. 软件是什么、不是什么
 
-1.1 NadirStation GK-2A HRIT 解码器（以下简称“本软件”）由 AGcov（BI2QYN）（以下简称“开发者”）开发，是一个离线工具：它读取你已经录制好的基带 IQ 文件（.cs8、.cs16、.wav），按照公开的 GK-2A（千里眼-2A，GEO-KOMPSAT-2A）HRIT 下行链路规范进行解调和纠错，重组出 HRIT 文件（文件结构遵循 CGMS LRIT/HRIT 全球规范），并由这些文件生成图像。
+1.1 NadirStation GK-2A HRIT 解码器（以下简称“本软件”）由 AGcov（BI2QYN）（以下简称“开发者”）开发，是一个离线工具：它读取你已经录制好的基带 IQ 文件（.cs8、.cs16、.cs32、.cf32、.cu8、.wav、.ziq、.ziq2），按照公开的 GK-2A（千里眼-2A，GEO-KOMPSAT-2A）HRIT 下行链路规范进行解调和纠错，重组出 HRIT 文件（文件结构遵循 CGMS LRIT/HRIT 全球规范），并由这些文件生成图像。
 
 1.2 本软件只读取文件，不控制任何无线电硬件，不具备发射功能，其自身代码也不包含联网功能（见第 7 条）。
 
@@ -134,7 +134,7 @@ The clauses on liability, disclaimers and assumption of risk affect your rights 
 
 1. What the software is and is not
 
-1.1 NadirStation GK-2A HRIT Decoder (the "Software") is developed by AGcov（BI2QYN） (the "Developer"). It is an offline tool: it reads baseband IQ recordings that you already have (.cs8, .cs16, .wav) and, following the public GK-2A (GEO-KOMPSAT-2A) HRIT downlink specification, demodulates them, applies error correction, reassembles HRIT files (whose structure follows the CGMS LRIT/HRIT Global Specification) and builds images from them.
+1.1 NadirStation GK-2A HRIT Decoder (the "Software") is developed by AGcov（BI2QYN） (the "Developer"). It is an offline tool: it reads baseband IQ recordings that you already have (.cs8, .cs16, .cs32, .cf32, .cu8, .wav, .ziq, .ziq2) and, following the public GK-2A (GEO-KOMPSAT-2A) HRIT downlink specification, demodulates them, applies error correction, reassembles HRIT files (whose structure follows the CGMS LRIT/HRIT Global Specification) and builds images from them.
 
 1.2 The Software only reads files. It does not control any radio hardware, has no transmit function, and its own code contains no networking (see Section 7).
 

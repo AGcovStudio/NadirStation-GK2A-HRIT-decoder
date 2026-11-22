@@ -1,15 +1,15 @@
-﻿NadirStation GK-2A HRIT Decoder - Third-party notices / 第三方组件声明
+NadirStation GK-2A HRIT Decoder - Third-party notices / 第三方组件声明
 =====================================================================
-Version 1.0.1. This program is (c) AGcov（BI2QYN）. It includes or links the components below. Their
+Version 1.1.0. This program is (c) AGcov（BI2QYN）. It includes or links the components below. Their
 copyright belongs to their owners. Full licence texts are in the LICENSES folder next to this file.
 本程序版权归 AGcov（BI2QYN）所有。下列组件的版权归各自权利人，许可证全文见同目录的 LICENSES 文件夹。
 
 Component            Version   Licence                         How it is used / 使用方式
 -------------------  --------  ------------------------------  -----------------------------------------
-Qt (Core, Gui,       6.11.2    GNU LGPL v3                     Shipped as unmodified DLLs from the Qt
- Widgets, Svg,                 (LICENSES\Qt_LGPL-3.0.txt,      online installer (MinGW 64-bit). The
- Network) + plugins            GPL-3.0.txt)                    program is dynamically linked. You may
- (platforms, styles,                                           replace them: see LGPL_COMPLIANCE.txt.
+Qt (Core, Gui,       6.8.3 LTS GNU LGPL v3                     Shipped as unmodified DLLs from the Qt
+ Widgets, Svg,        (CI) /    (LICENSES\Qt_LGPL-3.0.txt,      online installer (MinGW 64-bit). The
+ Network) + plugins   6.11.2    GPL-3.0.txt)                    program is dynamically linked. You may
+ (platforms, styles,  (release)                                 replace them: see LGPL_COMPLIANCE.txt.
  imageformats,
  iconengines, generic,
  networkinformation, tls)
@@ -18,6 +18,10 @@ OpenJPEG             2.5.3     BSD 2-Clause                    Static library, J
 libjpeg-turbo        3.1.2     BSD-3-Clause, IJG, zlib         Static library, JPEG decoding.
                                (LICENSES\libjpeg-turbo_...)    This software is based in part on the
                                                                work of the Independent JPEG Group.
+zstd                 1.5.7     BSD 3-Clause                    Static library, decompression of
+                               (LICENSES\zstd_BSD-3-Clause.txt) zstd-compressed ZIQ recordings.
+                                                               Only used when such a recording is
+                                                               opened.
 Natural Earth        -         Public domain                   Country boundaries (China point of view)
                                (LICENSES\NaturalEarth_...)     and land mask used in product images.
 MinGW-w64 runtime    -         GPL v3 + GCC Runtime Library    libstdc++-6.dll, libgcc_s_seh-1.dll,
