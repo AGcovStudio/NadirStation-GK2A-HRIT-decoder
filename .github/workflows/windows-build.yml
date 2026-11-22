@@ -1,0 +1,150 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64 (MinGW)
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt and the matching MinGW toolchain
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_mingw
+          tools: tools_mingw1310
+          cache: true
+
+      - name: Put the Qt MinGW toolchain first on PATH
+        shell: pwsh
+        run: |
+          $tool = Get-ChildItem -LiteralPath $env:IQTA_TOOLS -Directory -Filter 'mingw*_64' |
+            Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $tool) { throw "MinGW toolchain not found under $env:IQTA_TOOLS" }
+          "$($tool.FullName)\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "HRIT_MINGW=$($tool.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "HRIT_QT=$env:QT_ROOT_DIR" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Show tool versions
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+          gcc --version | Select-Object -First 1
+          Write-Host "Qt: $env:QT_ROOT_DIR"
+          Write-Host "MinGW: $env:HRIT_MINGW"
+
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: third_party
+          key: third-party-${{ runner.os }}-${{ hashFiles('scripts/fetch_third_party.ps1') }}
+
+      - name: Fetch third-party sources
+        shell: pwsh
+        run: ./scripts/fetch_third_party.ps1
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_PREFIX_PATH="$env:HRIT_QT" `
+            -DCMAKE_C_COMPILER="$env:HRIT_MINGW\bin\gcc.exe" `
+            -DCMAKE_CXX_COMPILER="$env:HRIT_MINGW\bin\g++.exe" `
+            -DHRIT_BUILD_GUI=ON `
+            -DHRIT_BUILD_CLI=ON `
+            -DHRIT_BUILD_TESTS=ON `
+            -DHRIT_WITH_ZSTD=ON
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --parallel
+
+      - name: Test
+        shell: pwsh
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Check the baseband format support is compiled in
+        shell: pwsh
+        run: |
+          $formats = & .\build\hrit_cli.exe --formats
+          $formats | Write-Host
+          if (-not ($formats -match 'ziq')) { throw 'ziq is missing from the format list' }
+          if (-not ($formats -match 'ziq2')) { throw 'ziq2 is missing from the format list' }
+          if (-not ($formats -match 'zstd compression: yes')) {
+            throw 'zstd-compressed ZIQ support was not compiled in'
+          }
+
+      - name: Collect the portable program
+        shell: pwsh
+        run: |
+          $match = Select-String -Path CMakeLists.txt -Pattern 'VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)'
+          if (-not $match) { throw 'cannot read the project version from CMakeLists.txt' }
+          $version = $match.Matches[0].Groups[1].Value
+
+          $dist = Join-Path $PWD 'dist'
+          if (Test-Path -LiteralPath $dist) { Remove-Item -LiteralPath $dist -Recurse -Force }
+          cmake --install build --prefix $dist
+
+          $exe = Join-Path $dist 'NadirStation_GK2A-HRIT_decoder.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw "missing $exe after install" }
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw $exe
+          foreach ($unused in 'dxcompiler.dll', 'dxil.dll') {
+            $p = Join-Path $dist $unused
+            if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force }
+          }
+
+          $zip = "NadirStation_GK2A-HRIT_decoder_${version}_win64.zip"
+          if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+          Compress-Archive -Path (Join-Path $dist '*') -DestinationPath $zip -CompressionLevel Optimal
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = @(
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+            (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+          if (-not $iscc) {
+            $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            if ($cmd) { $iscc = $cmd.Source }
+          }
+          if (-not $iscc) {
+            Write-Warning 'Inno Setup 6 was not found; only the portable ZIP is produced.'
+            return
+          }
+          & $iscc 'installer\NadirStation_GK2A-HRIT_decoder.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+          $setup = Get-ChildItem -LiteralPath 'installer\output' -Filter '*.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'ISCC did not write an installer' }
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: NadirStation-GK2A-HRIT-decoder-win64
+          path: NadirStation_GK2A-HRIT_decoder_*_win64.zip
+          if-no-files-found: error
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: NadirStation-GK2A-HRIT-decoder-win64-installer
+          path: installer/output/*.exe
+          if-no-files-found: warn
