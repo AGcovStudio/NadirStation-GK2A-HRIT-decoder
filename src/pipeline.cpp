@@ -21,8 +21,8 @@ bool HritPipeline::configure(double sampleRate, std::string& error) {
     sampleRate_ = sampleRate;
     demod_.configure(static_cast<float>(sampleRate), static_cast<float>(kSymbolRate), kRrcAlpha, kCarrierLoopBw,
                      kTimingLoopBw);
-    link_.setAsync(true);
-    link_.setRescueBudget(0.0);   // offline file decoding: no wall-clock limit on the soft-decision rescue   // the link decoder gets its own thread, like in the live receiver
+    link_.setRescueBudget(0.0);   // offline file decoding: no wall-clock limit on the soft-decision rescue
+    link_.setAsync(true);         // the link decoder gets its own thread, like in the live receiver
     configured_ = true;
     reset();
     return true;

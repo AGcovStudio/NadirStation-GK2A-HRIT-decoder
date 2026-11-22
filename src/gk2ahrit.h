@@ -67,6 +67,10 @@ public:
     }
     bool async() const { return async_; }
 
+    // Share of wall-clock time the soft-decision rescue may use (default 0.5); 0 or less removes the
+    // limit, for offline decoding. Set before setAsync(true).
+    void setRescueBudget(double ratio) { link_.setRescueBudget(ratio); }
+
     void reset() {
         if (!async_) { link_.reset(); statsView_ = link_.stats(); return; }
         std::unique_lock<std::mutex> lock(m_);

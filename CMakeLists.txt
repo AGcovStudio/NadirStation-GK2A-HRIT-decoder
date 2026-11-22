@@ -19,6 +19,8 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/openjpeg-2.5.3")
     set(_default_tp "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/openjpeg-2.5.3")
     set(_default_tp "${CMAKE_CURRENT_SOURCE_DIR}/../third_party")      # this folder sits inside the NadirStation tree
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/openjpeg-2.5.3")
+    set(_default_tp "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party")   # one level deeper, e.g. NadirStation/opensource_release/<this>
 else()
     set(_default_tp "${CMAKE_CURRENT_SOURCE_DIR}/../fy2_groundstation/third_party")
 endif()
