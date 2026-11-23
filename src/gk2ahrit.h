@@ -70,6 +70,12 @@ public:
     // Share of wall-clock time the soft-decision rescue may use (default 0.5); 0 or less removes the
     // limit, for offline decoding. Set before setAsync(true).
     void setRescueBudget(double ratio) { link_.setRescueBudget(ratio); }
+    // The other rescue knobs are forwarded too, so a caller that needs them does not have to reach
+    // into the decoder. Call before feeding symbols.
+    void setRescueEnabled(bool on) { link_.setRescueEnabled(on); }
+    void setRescueThreads(int n) { link_.setRescueThreads(n); }
+    void setRandomTrials(int n) { link_.setRandomTrials(n); }
+    void setMissLimit(int frames) { link_.setMissLimit(frames); }
 
     void reset() {
         if (!async_) { link_.reset(); statsView_ = link_.stats(); return; }

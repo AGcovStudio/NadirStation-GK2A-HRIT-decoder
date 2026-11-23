@@ -150,6 +150,27 @@ private:
 };
 
 
+// Removes a constant or slowly drifting complex offset (LO leakage, ADC offset, the centre spike of
+// a direct-sampling SDR) from an IQ stream. It subtracts a one-pole estimate of the mean; the corner
+// is a few hundred hertz, far below the 3 MHz HRIT signal, so the wanted signal passes untouched.
+// Used by QpskDemod before the AGC and the carrier loops.
+class DcBlocker {
+public:
+    // alpha = 1 - exp(-2*pi*fc/fs), clamped to a stable range.
+    void configure(float sampleRate, float cutoffHz = 500.0f);
+    void reset() { mean_ = {0.0f, 0.0f}; }
+    std::complex<float> process(std::complex<float> x) {
+        mean_ += (x - mean_) * alpha_;
+        return x - mean_;
+    }
+    std::complex<float> estimate() const { return mean_; }
+
+private:
+    float alpha_ = 1.0f / 4096.0f;
+    std::complex<float> mean_{0.0f, 0.0f};
+};
+
+
 // QPSK demodulator for GK-2A HRIT (3 Msym/s, RRC 0.5). Built for low SNR and low sample rates:
 //
 //   0. acquisition: carrier offset from the spectrum of the fourth power of the signal (QPSK to
@@ -199,6 +220,15 @@ public:
     // Force the low-rate branch (Mueller & Muller timing detector, MMSE receive filter) even at two
     // samples per symbol, to compare the two detectors on the same signal.
     void setForceLowRate(bool on) { forceMm_ = on; }
+    // DC blocker: on by default. An RTL-SDR's centre spike sits in the middle of the HRIT signal and
+    // its fourth-power line can fool the carrier search; an ADC/LO offset biases the AGC as well.
+    void setDcBlock(bool on) { dcBlockEnabled_ = on; }
+    void setDcBlockCutoff(float hz) {
+        dcCutoffHz_ = hz;
+        if (configured_) dcBlocker_.configure(rate_, dcCutoffHz_);
+    }
+    // The offset currently being subtracted (diagnostics/tests).
+    std::complex<float> dcEstimate() const { return dcBlocker_.estimate(); }
 
 private:
     void acquire();
@@ -209,8 +239,8 @@ private:
     // filter and the sampling cut away the roll-off, so Gardner has almost nothing to work from and
     // its integrator runs away (seen on a real recording: lock for about 5 s, then period at the clamp).
     // Mueller & Muller works from the decisions and needs no excess bandwidth. The RTL-SDR's DC spike
-    // also sits in the middle of the signal and its 4th power line fools the carrier search, so a
-    // slow DC blocker runs ahead of everything at these rates.
+    // also sits in the middle of the signal and its 4th power line fools the carrier search, so a DC
+    // blocker runs ahead of everything (see setDcBlock).
     bool lowRate_ = false;
     double mmseDesignSnrDb_ = 0.0;                // design Es/N0 of the low-rate receive filter
     double clampFrac_ = 0.005;                    // period limit, fraction of the nominal period
@@ -218,10 +248,12 @@ private:
     double timingOffset_ = 0.0;                   // diagnostics: initial sampling instant, samples
     double zeta_ = 0.70710678;                     // loop damping factor
     bool forceMm_ = false;                         // diagnostics: use the low-rate timing detector
+    bool dcBlockEnabled_ = true;                   // remove the DC offset before the AGC
+    float dcCutoffHz_ = 500.0f;                    // DC blocker corner, far below the signal
+    DcBlocker dcBlocker_;
     double cErrRms_ = 0.0, tErrRms_ = 0.0;        // diagnostics: detector jitter
     double cErrAcc_ = 0.0, tErrAcc_ = 0.0; long cErrN_ = 0, tErrN_ = 0;
     float mfSymbols_ = -6.0f;                      // matched-filter half span, symbols (negative: no taper)
-    std::complex<float> dc_{0.0f, 0.0f};
     float inRate_ = 6e6f, rate_ = 6e6f, symbolRate_ = 3e6f, alpha_ = 0.5f;
     float cBw_ = 0.004f, tBw_ = 0.0008f;
     int decim_ = 1;

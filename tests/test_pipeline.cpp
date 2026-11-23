@@ -1,4 +1,6 @@
-// Command-line check of the receive chain without the window: test_pipeline <file.cs8|cs16|wav> [sampleRateHz] [--no-repair] [--dump=cadus.bin]
+// Command-line check of the receive chain without the window:
+//   hrit_cli <recording> [sampleRateHz] [--no-repair] [--dump=cadus.bin]
+//   hrit_cli --formats
 #include "iqreader.h"
 #include "pipeline.h"
 #include "repair.h"
@@ -8,8 +10,33 @@
 #include <cstring>
 #include <map>
 
+namespace {
+
+void printFormats() {
+    std::printf("supported baseband formats:\n");
+    for (hritapp::IqFormat f : {hritapp::IqFormat::Cs8, hritapp::IqFormat::Cs16, hritapp::IqFormat::Cs32,
+                                hritapp::IqFormat::Cf32, hritapp::IqFormat::Cu8, hritapp::IqFormat::Wav,
+                                hritapp::IqFormat::Ziq, hritapp::IqFormat::Ziq2}) {
+        std::printf("  %-5s %s\n", hritapp::formatShortName(f), hritapp::formatName(f));
+    }
+#ifdef HRIT_HAVE_ZSTD
+    std::printf("ziq zstd compression: yes\n");
+#else
+    std::printf("ziq zstd compression: no (uncompressed ZIQ only)\n");
+#endif
+}
+
+}  // namespace
+
 int main(int argc, char** argv) {
-    if (argc < 2) { std::fprintf(stderr, "usage: %s file.cs8|cs16|wav [sampleRateHz] [--no-repair] [--dump=cadus.bin]\n", argv[0]); return 2; }
+    if (argc < 2) {
+        std::fprintf(stderr,
+                     "usage: %s <recording> [sampleRateHz] [--no-repair] [--dump=cadus.bin]\n"
+                     "       %s --formats\n",
+                     argv[0], argv[0]);
+        return 2;
+    }
+    if (!std::strcmp(argv[1], "--formats")) { printFormats(); return 0; }
     bool repair = true;
     const char* dumpPath = nullptr;
     double rate = 0.0;
@@ -22,8 +49,13 @@ int main(int argc, char** argv) {
     std::string error;
     if (!reader.open(argv[1], rate, error)) { std::fprintf(stderr, "open: %s\n", error.c_str()); return 1; }
     const auto& info = reader.info();
-    std::printf("format %s, %.0f Hz (%s), %llu samples, %.2f s\n", hritapp::formatName(info.format), info.sampleRate,
-                info.rateSource.c_str(), static_cast<unsigned long long>(info.frames), info.frames / info.sampleRate);
+    if (info.framesExact)
+        std::printf("format %s, %.0f Hz (%s), %llu samples, %.2f s\n", hritapp::describeFormat(info).c_str(),
+                    info.sampleRate, info.rateSource.c_str(), static_cast<unsigned long long>(info.frames),
+                    info.frames / info.sampleRate);
+    else
+        std::printf("format %s, %.0f Hz (%s), sample count unknown (streaming format)\n",
+                    hritapp::describeFormat(info).c_str(), info.sampleRate, info.rateSource.c_str());
     hritapp::HritPipeline pipe;
     if (!pipe.configure(info.sampleRate, error)) { std::fprintf(stderr, "configure: %s\n", error.c_str()); return 1; }
     pipe.setCollectFrames(repair);

@@ -40,7 +40,8 @@ public:
     HritPipeline() = default;
 
     // false (with a message) when the sample rate cannot carry the signal.
-    bool configure(double sampleRate, std::string& error);
+    // dcBlock removes the DC offset (LO leakage / SDR centre spike) before the AGC and carrier loops.
+    bool configure(double sampleRate, std::string& error, bool dcBlock = true);
     void reset();
     // One block of IQ. Completed LRIT files are handed to onFile. Returns the symbols of this block (for the display).
     const std::vector<std::complex<float>>& process(const std::vector<std::complex<float>>& iq,
